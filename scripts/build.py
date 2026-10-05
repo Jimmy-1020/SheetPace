@@ -28,7 +28,7 @@ def main():
     helper_digest = hashlib.sha256(helper.read_bytes()).hexdigest()
     host_digest = hashlib.sha256(host.read_bytes()).hexdigest()
     (ROOT / "src/Installer/BuildInfo.cs").write_text('namespace SheetPaceInstaller { internal static class BuildInfo { internal const string DllHash = "' + digest + '"; internal const string HelperHash = "' + helper_digest + '"; internal const string HostHash = "' + host_digest + '"; } }', encoding="utf-8")
-    compile_cs(DIST / "SheetPace-Setup-1.0.2.exe", sorted((ROOT / "src/Installer").glob("*.cs")), refs,
+    compile_cs(DIST / "SheetPace-Setup-1.0.3.exe", sorted((ROOT / "src/Installer").glob("*.cs")), refs,
                ["/target:winexe", "/win32manifest:" + str(ROOT / "src/Installer/app.manifest"), "/resource:" + str(dll) + ",SheetPace.dll", "/resource:" + str(helper) + ",SheetPace.NativeMenu.exe", "/resource:" + str(host) + ",SheetPace.VisualHost.exe"])
     if (ROOT / "tests/CoreTests.cs").exists():
         compile_cs(DIST / "SheetPace.Tests.exe", [ROOT / "tests/CoreTests.cs"], refs + uia + [dll], ["/target:exe"])

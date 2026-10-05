@@ -26,7 +26,7 @@ namespace SheetPace
         private readonly WindowProc procedure;
         private readonly string className = "SheetPace.HoverProbe." + Guid.NewGuid().ToString("N");
         private readonly IntPtr instance = GetModuleHandleW(null);
-        private readonly Func<bool> enabled;
+        private readonly Func<Settings> currentSettings;
         private readonly Action refreshSettings;
         private int settingsStamp;
         private readonly HoverPacket packet;
@@ -34,13 +34,13 @@ namespace SheetPace
         private IntPtr window;
         private bool registered, stopping, busy;
         private string geometryKey, headerKey;
-        private Rectangle rectangle;
+        private Rectangle rectangle, targetGrid;
         private int headerStamp;
         private readonly List<int[]> headers = new List<int[]>();
         private readonly HoverFrame latest = new HoverFrame();
-        internal HoverProbe(object application, uint process, Func<bool> active, Action refresh)
+        internal HoverProbe(object application, uint process, Func<Settings> active, Action refresh)
         {
-            app = application; enabled = active; refreshSettings = refresh; procedure = Dispatch;
+            app = application; currentSettings = active; refreshSettings = refresh; procedure = Dispatch;
             packet = new HoverPacket(process, true);
             try
             {
@@ -58,34 +58,55 @@ namespace SheetPace
         }
         private void Sample()
         {
-            busy = true; Stopwatch watch = Stopwatch.StartNew(); dynamic view = null, cell = null, sheet = null;
+            busy = true; Stopwatch watch = Stopwatch.StartNew(); dynamic view = null, cell = null, selected = null, targetArea = null, sheet = null;
             try
             {
-                latest.Visible = false;
+                latest.Visible = latest.PointerValid = latest.FilterHeader = false;
+                latest.Row = latest.Column = latest.TargetRow = latest.TargetColumn = 0;
                 if (unchecked(Environment.TickCount - settingsStamp) >= 1000) { settingsStamp = Environment.TickCount; refreshSettings(); }
-                if (!enabled()) return;
+                Settings settings = currentSettings();
+                if (settings == null || (!settings.HoverEnabled && !settings.NativeCountsEnabled)) return;
+                latest.Mode = settings.Mode;
                 IntPtr main = new IntPtr((int)app.Hwnd);
                 if (NativeMethods.GetForegroundWindow() != main) { geometryKey = null; return; }
                 NativeMethods.POINT cursor; NativeMethods.GetCursorPos(out cursor); Point pointer = new Point(cursor.X, cursor.Y);
                 if ((NativeMethods.GetAsyncKeyState(1) & 0x8000) != 0 || (NativeMethods.GetAsyncKeyState(2) & 0x8000) != 0) { geometryKey = null; return; }
-                Rectangle grid = GridGeometry.FindGrid(main, pointer); if (grid.IsEmpty) return;
-                view = app.ActiveWindow; cell = view.RangeFromPoint(pointer.X, pointer.Y); if (cell == null) return;
-                sheet = app.ActiveSheet; string name = (string)sheet.Name;
-                int row = (int)cell.Row, column = (int)cell.Column;
-                string layout = main + ":" + name + ":" + row + ":" + column + ":" + grid + ":" + view.Zoom + ":" + view.ScrollRow + ":" + view.ScrollColumn;
-                if (geometryKey != layout || !rectangle.Contains(pointer))
-                { rectangle = GridGeometry.CellRectangle(view, cell, grid, pointer); geometryKey = layout; }
-                string key = main + ":" + name;
-                if (headerKey != key || unchecked(Environment.TickCount - headerStamp) > 1000) RefreshHeaders(sheet, key);
-                bool header = false;
-                foreach (int[] range in headers) if (row == range[0] && column >= range[1] && column <= range[2]) { header = true; break; }
-                latest.Visible = true; latest.Window = main; latest.Pointer = pointer; latest.Row = row; latest.Column = column;
-                latest.SheetName = name; latest.Grid = grid; latest.Cell = rectangle; latest.FilterHeader = header;
+                view = app.ActiveWindow; sheet = app.ActiveSheet; string name = (string)sheet.Name;
+                latest.Window = main; latest.Pointer = pointer; latest.SheetName = name;
+                Rectangle pointerGrid = GridGeometry.FindGrid(main, pointer);
+                if (!pointerGrid.IsEmpty) cell = view.RangeFromPoint(pointer.X, pointer.Y);
+                if (cell != null)
+                {
+                    latest.PointerValid = true; latest.Row = (int)cell.Row; latest.Column = (int)cell.Column;
+                    if (settings.NativeCountsEnabled)
+                    {
+                        string key = main + ":" + view.Caption + ":" + name;
+                        if (headerKey != key || unchecked(Environment.TickCount - headerStamp) > 1000) RefreshHeaders(sheet, key);
+                        foreach (int[] range in headers)
+                            if (latest.Row == range[0] && latest.Column >= range[1] && latest.Column <= range[2]) { latest.FilterHeader = true; break; }
+                    }
+                }
+                if (!settings.HoverEnabled) return;
+                dynamic target = cell;
+                if (settings.Mode == HighlightMode.ClickSelection) { selected = app.ActiveCell; target = selected; }
+                if (target == null) return;
+                targetArea = target.MergeArea; latest.TargetRow = (int)targetArea.Row; latest.TargetColumn = (int)targetArea.Column;
+                List<Rectangle> grids = settings.Mode == HighlightMode.ClickSelection ? GridGeometry.FindGrids(main) : new List<Rectangle> { pointerGrid };
+                string layout = main + ":" + view.Caption + ":" + name + ":" + settings.Mode + ":" + latest.TargetRow + ":" + latest.TargetColumn + ":" + String.Join(";", grids)
+                    + ":" + view.Zoom + ":" + view.ScrollRow + ":" + view.ScrollColumn + ":" + view.SplitRow + ":" + view.SplitColumn;
+                if (geometryKey != layout || (settings.Mode == HighlightMode.FollowMouse && !rectangle.Contains(pointer)))
+                {
+                    if (settings.Mode == HighlightMode.ClickSelection)
+                        rectangle = GridGeometry.SelectionRectangle(view, target, grids, pointer, out targetGrid);
+                    else { targetGrid = pointerGrid; rectangle = GridGeometry.CellRectangle(view, target, pointerGrid, pointer); }
+                    geometryKey = layout;
+                }
+                latest.Grid = targetGrid; latest.Cell = rectangle; latest.Visible = !rectangle.IsEmpty && !targetGrid.IsEmpty;
             }
             catch { geometryKey = null; latest.Visible = false; }
             finally
             {
-                ExcelContext.Release(sheet); ExcelContext.Release(cell); ExcelContext.Release(view);
+                ExcelContext.Release(targetArea); ExcelContext.Release(selected); ExcelContext.Release(sheet); ExcelContext.Release(cell); ExcelContext.Release(view);
                 watch.Stop(); latest.ElapsedMicroseconds = (int)Math.Min(Int32.MaxValue, watch.ElapsedTicks * 1000000L / Stopwatch.Frequency);
                 latest.Timestamp = Environment.TickCount;
                 try { packet.Publish(latest); } catch { }

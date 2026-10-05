@@ -38,15 +38,32 @@ class CoreTests
             Check(data.TryGetCount("2026", null, null, out n) && n == 3, "year group");
             Check(data.TryGetCount("10月", "2026", null, out n) && n == 3, "Chinese month group");
             Check(data.TryGetCount("5", "2026", "10月", out n) && n == 2, "day group");
-            Settings settings = new Settings(); settings.Transparency = 100; Check(settings.Alpha == 0, "100 percent transparency");
+            Settings settings = new Settings(); Check(settings.Mode == HighlightMode.ClickSelection, "default highlight mode is click selection"); settings.Transparency = 100; Check(settings.Alpha == 0, "100 percent transparency");
             settings.Transparency = 0; Check(settings.Alpha == 255, "zero percent transparency");
-            settings.HighlightColor = Color.FromArgb(21, 45, 89); settings.Transparency = 76; settings.HoverEnabled = false;
+            settings.HighlightColor = Color.FromArgb(21, 45, 89); settings.Transparency = 76; settings.HoverEnabled = false; settings.Mode = HighlightMode.FollowMouse;
             string dir = args.Length > 0 ? args[0] : Path.Combine(Path.GetTempPath(), "SheetPace-tests"); Directory.CreateDirectory(dir);
             string path = Path.Combine(dir, "settings-test.ini"); settings.Save(path); settings.Save(path);
             Settings loaded = Settings.Load(path);
-            Check(loaded.Transparency == 76 && loaded.HighlightColor.ToArgb() == settings.HighlightColor.ToArgb() && !loaded.HoverEnabled, "settings atomic save and roundtrip");
+            Check(loaded.Transparency == 76 && loaded.HighlightColor.ToArgb() == settings.HighlightColor.ToArgb() && !loaded.HoverEnabled && loaded.Mode == HighlightMode.FollowMouse, "settings atomic save and roundtrip");
             File.WriteAllText(path, "Transparency=150" + Environment.NewLine + "Color=invalid");
             Check(Settings.Load(path).Transparency == 100, "corrupt settings clamped"); File.Delete(path);
+            File.WriteAllText(path, "HoverEnabled=True" + Environment.NewLine + "Transparency=61");
+            Check(Settings.Load(path).Mode == HighlightMode.ClickSelection && Settings.Load(path).Transparency == 61, "old settings migrate to selection and keep appearance");
+            File.WriteAllText(path, "Mode=99"); Check(Settings.Load(path).Mode == HighlightMode.ClickSelection, "invalid highlight mode falls back to selection"); File.Delete(path);
+            using (RibbonImages icons = new RibbonImages())
+            {
+                foreach (object picture in new[] { icons.Hover, icons.Settings })
+                {
+                    Guid iid = new Guid("7BF80981-BF32-101A-8BBB-00AA00300CAB");
+                    IntPtr dispatch = System.Runtime.InteropServices.Marshal.GetIDispatchForObject(picture), result;
+                    int hr = System.Runtime.InteropServices.Marshal.QueryInterface(dispatch, ref iid, out result);
+                    Check(hr == 0 && result != IntPtr.Zero, "Ribbon icon exposes native IPictureDisp");
+                    if (result != IntPtr.Zero) System.Runtime.InteropServices.Marshal.Release(result);
+                    System.Runtime.InteropServices.Marshal.Release(dispatch);
+                }
+                using (Bitmap bitmap = RibbonImages.Bitmap(false)) bitmap.Save(Path.Combine(dir, "hover-icon.png"));
+                using (Bitmap bitmap = RibbonImages.Bitmap(true)) bitmap.Save(Path.Combine(dir, "settings-icon.png"));
+            }
             int size = 100000; object[,] large = new object[size, 1]; for (int i = 0; i < size; i++) large[i, 0] = i % 23;
             data = Count(large, "General"); Check(data.Total == size && data.Items.Count == 23, "100000 row frequency calculation");
             FilterMenu menu = new FilterMenu { Window = new IntPtr(123456), Timestamp = 7654321, Bounds = new Rectangle(10, 20, 300, 400) };
@@ -74,9 +91,9 @@ class CoreTests
                 Check(reader.Read() == null, "hover reader ignores uninitialized packet");
                 writer.Publish(new HoverFrame { Visible = true, Window = new IntPtr(123456), Row = 7, Column = -7,
                     Pointer = new Point(7, -7), Grid = new Rectangle(7, 2, 3, 4), Cell = new Rectangle(5, 7, 8, 9),
-                    SheetName = "定位测试", FilterHeader = true, ElapsedMicroseconds = 1200, Timestamp = 9 });
+                    SheetName = "定位测试", FilterHeader = true, PointerValid = true, TargetRow = 12, TargetColumn = 4, Mode = HighlightMode.ClickSelection, ElapsedMicroseconds = 1200, Timestamp = 9 });
                 HoverFrame received = reader.Read();
-                Check(received != null && received.Row == 7 && received.Column == -7 && received.Pointer == new Point(7, -7) && received.Grid.X == 7 && received.Cell.Y == 7 && received.SheetName == "定位测试" && received.FilterHeader && received.Window == new IntPtr(123456) && received.ElapsedMicroseconds == 1200, "hover packet geometry and metadata roundtrip");
+                Check(received != null && received.Row == 7 && received.Column == -7 && received.Pointer == new Point(7, -7) && received.Grid.X == 7 && received.Cell.Y == 7 && received.SheetName == "定位测试" && received.FilterHeader && received.Window == new IntPtr(123456) && received.ElapsedMicroseconds == 1200 && received.PointerValid && received.TargetRow == 12 && received.TargetColumn == 4 && received.Mode == HighlightMode.ClickSelection, "hover packet geometry and metadata roundtrip");
                 System.Threading.Thread producer = new System.Threading.Thread(delegate()
                 {
                     for (int i = 8; i < 5008; i++) writer.Publish(new HoverFrame { Visible = true, Row = i, Column = -i, Pointer = new Point(i, -i), Grid = new Rectangle(i, 2, 3, 4), Cell = new Rectangle(5, i, 8, 9) });
@@ -91,14 +108,14 @@ class CoreTests
                 Check(coherent && samples > 0 && reader.Read().Row == 5007, "hover sequence protects concurrent readers from torn frames");
             }
             int refreshes = 0;
-            using (HoverProbe probe = new HoverProbe(new object(), testProcess, delegate { return false; }, delegate { refreshes++; }))
+            using (HoverProbe probe = new HoverProbe(new object(), testProcess, delegate { return new Settings { HoverEnabled = false, NativeCountsEnabled = false }; }, delegate { refreshes++; }))
             using (HoverPacket reader = new HoverPacket(testProcess, false))
             {
                 System.Threading.Thread.Sleep(60); Pump();
                 HoverFrame frame = reader.Read();
                 Check(frame != null && !frame.Visible && frame.Timestamp != 0 && refreshes > 0, "native STA timer publishes hidden frame without Excel or forms");
             }
-            using (HoverProbe probe = new HoverProbe(new object(), testProcess, delegate { return false; }, delegate { }))
+            using (HoverProbe probe = new HoverProbe(new object(), testProcess, delegate { return new Settings { HoverEnabled = false, NativeCountsEnabled = false }; }, delegate { }))
             using (HoverPacket reader = new HoverPacket(testProcess, false))
             {
                 System.Threading.Thread.Sleep(60); Pump();

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Drawing;
+using System.Collections.Generic;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Windows.Forms;
@@ -107,6 +108,99 @@ namespace SheetPace
                 return true;
             }, IntPtr.Zero);
             return found;
+        }
+        public static List<Rectangle> FindGrids(IntPtr parent)
+        {
+            List<Rectangle> grids = new List<Rectangle>();
+            NativeMethods.EnumChildWindows(parent, delegate(IntPtr hwnd, IntPtr unused)
+            {
+                if (NativeMethods.ClassName(hwnd) == "EXCEL7" && NativeMethods.IsWindowVisible(hwnd))
+                {
+                    Rectangle rect = NativeMethods.ClientRectangleOnScreen(hwnd);
+                    if (rect.Width > 0 && rect.Height > 0) grids.Add(rect);
+                }
+                return true;
+            }, IntPtr.Zero);
+            return grids;
+        }
+        public static Rectangle SelectionRectangle(dynamic window, dynamic cell, IList<Rectangle> grids, Point pointer, out Rectangle grid)
+        {
+            grid = Rectangle.Empty; dynamic merged = null;
+            try
+            {
+                merged = cell.MergeArea; int row = (int)merged.Row, column = (int)merged.Column;
+                foreach (Rectangle candidate in grids)
+                {
+                    Point seed;
+                    if (!SelectionPoint(window, merged, row, column, candidate, pointer, out seed)) continue;
+                    grid = candidate; return CellRectangle(window, cell, candidate, seed);
+                }
+                return Rectangle.Empty;
+            }
+            finally { ExcelContext.Release(merged); }
+        }
+        private static bool Matches(dynamic window, Point point, int row, int column)
+        {
+            dynamic hit = null, merged = null;
+            try
+            {
+                hit = window.RangeFromPoint(point.X, point.Y); if (hit == null) return false;
+                merged = hit.MergeArea; return (int)merged.Row == row && (int)merged.Column == column;
+            }
+            catch { return false; }
+            finally { ExcelContext.Release(merged); ExcelContext.Release(hit); }
+        }
+        private static bool SelectionPoint(dynamic window, dynamic cell, int row, int column, Rectangle grid, Point pointer, out Point seed)
+        {
+            seed = pointer;
+            if (grid.Contains(seed) && Matches(window, seed, row, column)) return true;
+            // Treat Excel's point conversion only as a hint: verify physical hit testing.
+            try
+            {
+                seed = new Point((int)window.PointsToScreenPixelsX((int)Math.Round((double)cell.Left + (double)cell.Width / 2)),
+                    (int)window.PointsToScreenPixelsY((int)Math.Round((double)cell.Top + (double)cell.Height / 2)));
+                if (grid.Contains(seed) && Matches(window, seed, row, column)) return true;
+            }
+            catch { }
+            // Visible row/column indices are monotone, including the jump at a frozen pane.
+            // Find a physical seed without scanning all cells; then reuse the measured edges.
+            int[] xs = { grid.Right - 32, grid.Left + Math.Min(80, grid.Width / 2), grid.Left + grid.Width / 2 };
+            foreach (int x in xs)
+            {
+                int y = FindIndex(window, grid, false, x, row);
+                if (y == Int32.MinValue) continue;
+                int foundX = FindIndex(window, grid, true, y, column);
+                seed = new Point(foundX, y);
+                if (foundX != Int32.MinValue && Matches(window, seed, row, column)) return true;
+            }
+            int[] ys = { grid.Bottom - 32, grid.Top + Math.Min(60, grid.Height / 2), grid.Top + grid.Height / 2 };
+            foreach (int y in ys)
+            {
+                int x = FindIndex(window, grid, true, y, column);
+                if (x == Int32.MinValue) continue;
+                int foundY = FindIndex(window, grid, false, x, row);
+                seed = new Point(x, foundY);
+                if (foundY != Int32.MinValue && Matches(window, seed, row, column)) return true;
+            }
+            return false;
+        }
+        private static int FindIndex(dynamic window, Rectangle grid, bool horizontal, int fixedCoordinate, int expected)
+        {
+            int lower = horizontal ? grid.Left : grid.Top, upper = (horizontal ? grid.Right : grid.Bottom) - 1;
+            while (lower <= upper)
+            {
+                int midpoint = lower + (upper - lower) / 2, index = 0; dynamic hit = null;
+                try
+                {
+                    hit = window.RangeFromPoint(horizontal ? midpoint : fixedCoordinate, horizontal ? fixedCoordinate : midpoint);
+                    if (hit != null) index = (int)(horizontal ? hit.Column : hit.Row);
+                }
+                catch { }
+                finally { ExcelContext.Release(hit); }
+                if (index == expected) return midpoint;
+                if (index < expected) lower = midpoint + 1; else upper = midpoint - 1;
+            }
+            return Int32.MinValue;
         }
         public static Rectangle CellRectangle(dynamic window, dynamic cell, Rectangle grid, Point pointer)
         {

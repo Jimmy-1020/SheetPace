@@ -96,26 +96,38 @@ namespace SheetPace
         public SettingsForm(Settings settings)
         {
             Result = settings.Copy(); Theme.Apply(this); Text = "SheetPace · 光影设置";
-            ClientSize = new Size(454, 484); FormBorderStyle = FormBorderStyle.FixedDialog;
-            Label title = Theme.Label("让行列更容易辨认", 24, 20, 400, 32);
+            ClientSize = new Size(454, 600); FormBorderStyle = FormBorderStyle.FixedDialog;
+            Label title = Theme.Label("光影设置", 24, 20, 400, 32);
             title.Font = new Font(Font.FontFamily, 15, FontStyle.Bold); Controls.Add(title);
-            CheckBox hover = new CheckBox { Text = "启用鼠标悬停行列光影", Checked = Result.HoverEnabled, Location = new Point(24, 70), AutoSize = true };
-            CheckBox counts = new CheckBox { Text = "启用原生筛选数量标签", Checked = Result.NativeCountsEnabled, Location = new Point(24, 104), AutoSize = true };
+            CheckBox hover = new CheckBox { Text = "启用鼠标光影", Checked = Result.HoverEnabled, Location = new Point(24, 68), AutoSize = true };
+            Controls.Add(hover);
+            Controls.Add(Theme.Label("光影模式", 24, 110, 100, 26));
+            RadioButton selected = new RadioButton { Name = "selectionMode", Text = "点击选中（默认）", Checked = Result.Mode == HighlightMode.ClickSelection, Location = new Point(24, 142), AutoSize = true };
+            RadioButton follow = new RadioButton { Name = "followMode", Text = "鼠标跟随", Checked = Result.Mode == HighlightMode.FollowMouse, Location = new Point(254, 142), AutoSize = true };
+            Label hint = Theme.Label("", 24, 178, 406, 40);
+            Action updateMode = delegate
+            {
+                Result.Mode = follow.Checked ? HighlightMode.FollowMouse : HighlightMode.ClickSelection;
+                hint.Text = follow.Checked ? "鼠标移到哪个单元格，十字光影就跟随到该格。" : "十字光影定位当前选中的单元格，移动鼠标不改变位置。";
+            };
+            selected.CheckedChanged += delegate { updateMode(); }; follow.CheckedChanged += delegate { updateMode(); };
+            Controls.Add(selected); Controls.Add(follow); Controls.Add(hint); updateMode();
+            CheckBox counts = new CheckBox { Text = "启用原生筛选数量标签", Checked = Result.NativeCountsEnabled, Location = new Point(24, 224), AutoSize = true };
             hover.CheckedChanged += delegate { Result.HoverEnabled = hover.Checked; preview.Invalidate(); };
             counts.CheckedChanged += delegate { Result.NativeCountsEnabled = counts.Checked; };
-            Controls.Add(hover); Controls.Add(counts);
-            Controls.Add(Theme.Label("光影颜色", 24, 150, 100, 26));
-            Button color = Theme.Button("选择颜色", 320, 144, 110, false); color.BackColor = Result.HighlightColor;
+            Controls.Add(counts);
+            Controls.Add(Theme.Label("光影颜色", 24, 266, 100, 26));
+            Button color = Theme.Button("选择颜色", 320, 260, 110, false); color.BackColor = Result.HighlightColor;
             color.Click += delegate
             {
                 using (ColorDialog picker = new ColorDialog { Color = Result.HighlightColor, FullOpen = true })
                     if (picker.ShowDialog(this) == DialogResult.OK) { Result.HighlightColor = picker.Color; color.BackColor = picker.Color; preview.Invalidate(); }
             };
             Controls.Add(color);
-            Label opacity = Theme.Label("透明度 " + Result.Transparency + "%", 24, 192, 200, 25); Controls.Add(opacity);
-            TrackBar slider = new TrackBar { Minimum = 0, Maximum = 100, Value = Result.Transparency, TickFrequency = 10, Location = new Point(18, 222), Size = new Size(418, 44) };
+            Label opacity = Theme.Label("透明度 " + Result.Transparency + "%", 24, 308, 200, 25); Controls.Add(opacity);
+            TrackBar slider = new TrackBar { Minimum = 0, Maximum = 100, Value = Result.Transparency, TickFrequency = 10, Location = new Point(18, 338), Size = new Size(418, 44) };
             slider.ValueChanged += delegate { Result.Transparency = slider.Value; opacity.Text = "透明度 " + Result.Transparency + "%"; preview.Invalidate(); }; Controls.Add(slider);
-            preview = new Panel { Location = new Point(24, 282), Size = new Size(406, 118), BorderStyle = BorderStyle.FixedSingle };
+            preview = new Panel { Location = new Point(24, 398), Size = new Size(406, 118), BorderStyle = BorderStyle.FixedSingle };
             preview.Paint += delegate(object sender, PaintEventArgs e)
             {
                 int width = preview.ClientSize.Width, height = preview.ClientSize.Height;
@@ -131,7 +143,7 @@ namespace SheetPace
                 e.Graphics.DrawString("单元格内容", Font, Brushes.DimGray, 171, 34);
             };
             Controls.Add(preview);
-            Button cancel = Theme.Button("取消", 214, 428, 100, false), save = Theme.Button("保存设置", 326, 428, 104, true);
+            Button cancel = Theme.Button("取消", 214, 544, 100, false), save = Theme.Button("保存设置", 326, 544, 104, true);
             cancel.DialogResult = DialogResult.Cancel; save.DialogResult = DialogResult.OK;
             Controls.Add(cancel); Controls.Add(save); CancelButton = cancel; AcceptButton = save;
         }

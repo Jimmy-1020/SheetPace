@@ -18,7 +18,7 @@ namespace SheetPace
         private NativeFilterWatcher watcher;
         private uint process;
         private bool inTick, dialogOpen, wasPressed, nativeOpen;
-        private int tick, pendingRow, pendingColumn, lastRow, lastColumn, steadyTicks;
+        private int tick, pendingRow, pendingColumn, lastRow, lastColumn, steadyTicks, clickStamp;
         private string lastSheet, hoverKey, geometryKey;
         private Rectangle lastRectangle;
         private ExcelContext countContext;
@@ -26,6 +26,7 @@ namespace SheetPace
         private bool clickPending, bridge;
         private VisualHostBridge visualHost;
         private DateTime settingsStamp;
+        private RibbonImages images;
         public int VisualHostProcessId { get { return visualHost == null ? 0 : visualHost.ProcessId; } }
         public string GetCustomUI(string ribbonID)
         {
@@ -33,7 +34,7 @@ namespace SheetPace
             return @"<customUI xmlns='http://schemas.microsoft.com/office/2009/07/customui' onLoad='OnRibbonLoad'>
 +<ribbon><tabs><tab id='sheetpaceTab' label='SheetPace'>
 +<group id='sheetpaceFilter' label='计数筛选'><button id='showCountFilter' label='计数筛选' size='large' imageMso='Filter' onAction='OnShowFilter' screentip='显示本列各值的数量' supertip='选中目标列中的一个单元格，再打开搜索、多选和计数窗口。'/></group>
-+<group id='sheetpacePointer' label='行列定位'><toggleButton id='hoverToggle' label='鼠标光影' size='large' imageMso='ConditionalFormattingHighlightCellsRules' onAction='OnToggleHover' getPressed='GetHoverPressed'/><button id='settings' label='颜色与透明度' size='large' imageMso='ColorPicker' onAction='OnSettings'/></group>
++<group id='sheetpacePointer' label='行列定位'><toggleButton id='hoverToggle' label='鼠标光影' size='large' getImage='GetHoverImage' screentip='显示选中单元格或鼠标所在格的行列光影' onAction='OnToggleHover' getPressed='GetHoverPressed'/><button id='settings' label='光影设置' size='large' getImage='GetSettingsImage' screentip='设置光影模式、颜色与透明度' onAction='OnSettings'/></group>
 +<group id='sheetpaceHelp' label='使用帮助'><button id='help' label='使用说明' imageMso='Help' onAction='OnHelp'/></group>
 +</tab></tabs></ribbon></customUI>".Replace("\n+", "\n");
         }
@@ -50,7 +51,7 @@ namespace SheetPace
                 if (bridge)
                 {
                     if (addInInst != null) { dynamic instance = addInInst; instance.Object = this; }
-                    hoverProbe = new HoverProbe(application, process, delegate { return settings != null && (settings.HoverEnabled || settings.NativeCountsEnabled); }, delegate { RefreshRibbonSettings(null); });
+                    hoverProbe = new HoverProbe(application, process, delegate { return settings; }, delegate { RefreshRibbonSettings(null); });
                     visualHost = new VisualHostBridge(hwnd, process);
                     settingsStamp = System.IO.File.Exists(Settings.DefaultPath) ? System.IO.File.GetLastWriteTimeUtc(Settings.DefaultPath) : DateTime.MinValue;
                     Log.Write("PID=" + process + " VisualHost=" + visualHost.ProcessId, null);
@@ -77,6 +78,18 @@ namespace SheetPace
                 if (ribbon != null) ribbon.Invalidate();
             }
             catch { /* Office can be busy or closing. */ }
+        }
+        [return: MarshalAs(UnmanagedType.IDispatch)]
+        public object GetHoverImage(object control) { if (images == null) images = new RibbonImages(); return images.Hover; }
+        [return: MarshalAs(UnmanagedType.IDispatch)]
+        public object GetSettingsImage(object control) { if (images == null) images = new RibbonImages(); return images.Settings; }
+        public int GetHighlightMode(object control) { if (bridge) settings = Settings.Load(Settings.DefaultPath); return (int)(settings == null ? HighlightMode.ClickSelection : settings.Mode); }
+        public void OnSetMode(object control, int mode)
+        {
+            if (!Enum.IsDefined(typeof(HighlightMode), mode)) return;
+            if (bridge) { if (visualHost != null) visualHost.Send(5, mode); return; }
+            if (settings == null) return;
+            settings.Mode = (HighlightMode)mode; SaveSettings(); hoverKey = null;
         }
         public void OnRibbonLoad(object ui) { ribbon = ui; }
         public bool GetHoverPressed(object control) { if (bridge) settings = Settings.Load(Settings.DefaultPath); return settings == null || settings.HoverEnabled; }
@@ -130,7 +143,7 @@ namespace SheetPace
         public void OnHelp(object control)
         {
             if (bridge) { if (visualHost != null) visualHost.Send(3, 0); return; }
-            MessageBox.Show("1. 打开列标题的筛选按钮，支持的原生列表会显示数量标签。\n2. 选中目标列中的一个格子，点击“计数筛选”，可搜索、多选并按数量筛选。\n3. 鼠标移动到单元格即可显示行列光影。\n4. 点击“颜色与透明度”调整外观。\n\n计数排除标题，包含筛选区域内所有隐藏行；空白单独计数。\n原生菜单增强依赖 Office 的可访问性支持；不能识别时请使用计数筛选窗口。\n\n版本 1.0.2 · Windows Excel 2016 及以上\n诊断日志：" + Settings.DirectoryPath, "SheetPace 使用说明");
+            MessageBox.Show("1. 打开列标题的筛选按钮，支持的原生列表会显示数量标签。\n2. 选中目标列中的一个格子，点击“计数筛选”，可搜索、多选并按数量筛选。\n3. 默认点击选中单元格显示十字光影。\n4. 点击“光影设置”切换鼠标跟随，或调整颜色与透明度。\n\n计数排除标题，包含筛选区域内所有隐藏行；空白单独计数。\n原生菜单增强依赖 Office 的可访问性支持；不能识别时请使用计数筛选窗口。\n\n版本 1.0.3 · Windows Excel 2016 及以上\n诊断日志：" + Settings.DirectoryPath, "SheetPace 使用说明");
         }
         private void Tick(object sender, EventArgs args)
         {
@@ -143,7 +156,7 @@ namespace SheetPace
                 short buttonState = NativeMethods.GetAsyncKeyState(1);
                 bool pressed = (buttonState & 0x8000) != 0;
                 // Poll input on Excel's timer; native callback pointers cannot outlive shutdown.
-                if ((buttonState & 1) != 0 || (pressed && !wasPressed)) { clickPoint = pointer; clickPending = true; }
+                if ((buttonState & 1) != 0 || (pressed && !wasPressed)) { clickPoint = pointer; clickPending = true; clickStamp = Environment.TickCount; }
                 if (pressed && !wasPressed && lastRow > 0) { pendingRow = lastRow; pendingColumn = lastColumn; }
                 wasPressed = pressed;
                 if (++tick % (hoverPacket == null ? 3 : 8) == 0 && settings.NativeCountsEnabled && watcher != null) watcher.Request();
@@ -159,14 +172,17 @@ namespace SheetPace
                 if (hoverPacket != null)
                 {
                     HoverFrame frame = hoverPacket.Read();
-                    if (frame == null || !frame.Visible || unchecked(Environment.TickCount - frame.Timestamp) > 250)
+                    if (frame == null || unchecked(Environment.TickCount - frame.Timestamp) > 250)
                     { hover.Hide(); hoverKey = null; return; }
-                    bool movedFrame = frame.Pointer != lastPoint || frame.Row != lastRow || frame.Column != lastColumn || frame.SheetName != lastSheet;
-                    steadyTicks = movedFrame ? 0 : steadyTicks + 1;
-                    lastRow = frame.Row; lastColumn = frame.Column; lastSheet = frame.SheetName; lastPoint = frame.Pointer;
-                    pendingRow = frame.Row; pendingColumn = frame.Column;
-                    if (settings.NativeCountsEnabled && frame.FilterHeader && (steadyTicks == 0 || steadyTicks == 3)) TryCountContext(frame.Row, frame.Column, false);
-                    if (!settings.HoverEnabled) { hover.Hide(); return; }
+                    if (frame.PointerValid)
+                    {
+                        bool movedFrame = frame.Pointer != lastPoint || frame.Row != lastRow || frame.Column != lastColumn || frame.SheetName != lastSheet;
+                        steadyTicks = movedFrame ? 0 : steadyTicks + 1;
+                        lastRow = frame.Row; lastColumn = frame.Column; lastSheet = frame.SheetName; lastPoint = frame.Pointer;
+                        pendingRow = frame.Row; pendingColumn = frame.Column;
+                        if (settings.NativeCountsEnabled && frame.FilterHeader && (steadyTicks == 0 || steadyTicks == 3)) TryCountContext(frame.Row, frame.Column, false);
+                    }
+                    if (!settings.HoverEnabled || !frame.Visible) { hover.Hide(); hoverKey = null; return; }
                     string packetKey = frame.Window + ":" + frame.SheetName + ":" + frame.Grid + ":" + frame.Cell + ":" + settings.Alpha + ":" + settings.HighlightColor.ToArgb();
                     if (hoverKey != packetKey || !hover.Visible) { hover.DrawCross(frame.Grid, frame.Cell, settings); hoverKey = packetKey; }
                     return;
@@ -187,6 +203,19 @@ namespace SheetPace
                 // Precompute while hovering a filter header, before Excel enters its popup loop.
                 if (settings.NativeCountsEnabled && (steadyTicks == 0 || steadyTicks == 3)) TryCountContext(row, column, false);
                 if (!settings.HoverEnabled) { hover.Hide(); return; }
+                if (settings.Mode == HighlightMode.ClickSelection)
+                {
+                    dynamic selected = null;
+                    try
+                    {
+                        selected = app.ActiveCell; Rectangle selectedGrid;
+                        Rectangle selectedRect = GridGeometry.SelectionRectangle(window, selected, GridGeometry.FindGrids(main), pointer, out selectedGrid);
+                        hover.DrawCross(selectedGrid, selectedRect, settings);
+                    }
+                    finally { ExcelContext.Release(selected); }
+                    return;
+                }
+
                 string layout = main + ":" + sheet + ":" + row + ":" + column + ":" + grid + ":" + window.Zoom + ":" + window.ScrollRow + ":" + window.ScrollColumn;
                 if (hoverKey == null || geometryKey != layout || !lastRectangle.Contains(pointer))
                 { lastRectangle = GridGeometry.CellRectangle(window, cell, grid, pointer); geometryKey = layout; }
@@ -227,7 +256,12 @@ namespace SheetPace
                 bool abovePointer = menu.Bounds.Bottom >= lastPoint.Y - 48 && menu.Bounds.Bottom <= lastPoint.Y + 8;
                 if (atHeader && besidePointer && (belowPointer || abovePointer) && countContext.MatchesActive())
                 { TryCountContext(lastRow, lastColumn, true); return; }
-                if (clickPending) { window = app.ActiveWindow; cell = window.RangeFromPoint(clickPoint.X, clickPoint.Y); }
+                bool clickBeside = Math.Min(Math.Abs(menu.Bounds.Left - clickPoint.X), Math.Abs(menu.Bounds.Right - clickPoint.X)) <= 32;
+                bool clickBelow = menu.Bounds.Top >= clickPoint.Y - 8 && menu.Bounds.Top <= clickPoint.Y + 48;
+                bool clickAbove = menu.Bounds.Bottom >= clickPoint.Y - 48 && menu.Bounds.Bottom <= clickPoint.Y + 8;
+                // A click on a different cell or a dismissed dialog must not override a keyboard menu.
+                if (clickPending && unchecked(Environment.TickCount - clickStamp) <= 1500 && clickBeside && (clickBelow || clickAbove))
+                { window = app.ActiveWindow; cell = window.RangeFromPoint(clickPoint.X, clickPoint.Y); }
                 if (cell == null) cell = app.ActiveCell;
                 if (cell != null) TryCountContext((int)cell.Row, (int)cell.Column, true);
                 if (countContext != null && !countContext.MatchesActive()) DisposeContext();
@@ -297,6 +331,7 @@ namespace SheetPace
             if (hoverPacket != null) { hoverPacket.Dispose(); hoverPacket = null; }
             if (hover != null) { hover.Dispose(); hover = null; }
             if (counts != null) { counts.Dispose(); counts = null; }
+            if (images != null) { images.Dispose(); images = null; }
             DisposeContext(); ribbon = null; app = null;
         }
         public void OnDisconnection(DisconnectMode mode, ref Array custom) { Log.Write("PID=" + System.Diagnostics.Process.GetCurrentProcess().Id + " OnDisconnection " + mode, null); Stop(); }

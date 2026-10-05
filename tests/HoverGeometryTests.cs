@@ -11,9 +11,11 @@ class HoverGeometryTests
 {
     [DllImport("user32.dll")] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
     [DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr window);
+    [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr window);
     delegate bool EnumProc(IntPtr hwnd,IntPtr unused);
     [StructLayout(LayoutKind.Sequential)] struct RECT { public int L,T,R,B; }
+    [DllImport("user32.dll")] static extern void mouse_event(uint flags,uint dx,uint dy,uint data,UIntPtr extra);
     [DllImport("user32.dll")] static extern bool SetCursorPos(int x,int y);
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc callback,IntPtr unused);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd,out uint process);
@@ -44,7 +46,8 @@ class HoverGeometryTests
         Console.OutputEncoding=System.Text.Encoding.UTF8;SetThreadDpiAwarenessContext(new IntPtr(-4));
         string output=Path.GetFullPath(args[0]);Directory.CreateDirectory(output);
         dynamic app=null,book=null,sheet=null,window=null,addin=null;IDisposable packet=null;Settings originalSettings=null;
-        bool packetMode=args.Length>1 && args[1]=="--packet";
+        bool selectionMode=args.Length>1 && args[1]=="--selection";
+        bool packetMode=selectionMode || (args.Length>1 && args[1]=="--packet");
         try
         {
             app=Activator.CreateInstance(Type.GetTypeFromProgID("Excel.Application"));app.DisplayAlerts=false;
@@ -59,7 +62,7 @@ class HoverGeometryTests
             if(packetMode)
             {
                 originalSettings=Settings.Load(Settings.DefaultPath);
-                dynamic bridge=addin.Object;visualPid=(uint)(int)bridge.VisualHostProcessId;bridge.OnToggleHover(null,true);Release(bridge);Thread.Sleep(300);
+                dynamic bridge=addin.Object;visualPid=(uint)(int)bridge.VisualHostProcessId;bridge.OnToggleHover(null,true);bridge.OnSetMode(null,selectionMode?0:1);Release(bridge);Thread.Sleep(1200);
                 uint excelPid;GetWindowThreadProcessId(main,out excelPid);
                 Type type=typeof(Connect).Assembly.GetType("SheetPace.HoverPacket");
                 packet=(IDisposable)type.GetConstructor(BindingFlags.Instance|BindingFlags.NonPublic,null,new[]{typeof(uint),typeof(bool)},null).Invoke(new object[]{excelPid,false});
@@ -88,14 +91,24 @@ class HoverGeometryTests
                         Stopwatch watch=Stopwatch.StartNew();Rectangle rect=Rectangle.Empty;
                         if(packetMode)
                         {
-                            SetCursorPos(point.X,point.Y);object frame=null;
+                            if(selectionMode)merged.Select();
+                            SetForegroundWindow(main);SetCursorPos(point.X,point.Y);
+                            object frame=null;
                             while(watch.ElapsedMilliseconds<2000)
                             {
                                 object current=read.Invoke(packet,null);
-                                if(current!=null && (bool)Field(current,"Visible") && (Point)Field(current,"Pointer")==point){frame=current;break;}
+                                if(current!=null && (bool)Field(current,"Visible") && (Point)Field(current,"Pointer")==point && (int)Field(current,"TargetRow")==row && (int)Field(current,"TargetColumn")==column){frame=current;break;}
                                 Thread.Sleep(1);
                             }
-                            Check(frame!=null,"probe follows pointer");rect=(Rectangle)Field(frame,"Cell");
+                            if(frame==null)
+                            {
+                                object last=read.Invoke(packet,null);dynamic active=app.ActiveCell;
+                                string detail="mode="+mode+" i="+i+" expected="+row+","+column+" point="+point+" active="+active.Address;
+                                if(last!=null)detail+=" visible="+Field(last,"Visible")+" target="+Field(last,"TargetRow")+","+Field(last,"TargetColumn")+" pointer="+Field(last,"Pointer")+" rect="+Field(last,"Cell")+" selectedMode="+Field(last,"Mode");
+                                Release(active);IntPtr foreground=GetForegroundWindow();System.Text.StringBuilder title=new System.Text.StringBuilder(256);GetWindowText(foreground,title,256);detail+=" main="+main+" foreground="+foreground+" title="+title+" settings="+Settings.Load(Settings.DefaultPath).HoverEnabled;Console.WriteLine(detail);
+                                RECT bounds;GetWindowRect(main,out bounds);using(Bitmap screenshot=new Bitmap(bounds.R-bounds.L,bounds.B-bounds.T)){using(Graphics g=Graphics.FromImage(screenshot))g.CopyFromScreen(bounds.L,bounds.T,0,0,screenshot.Size);screenshot.Save(Path.Combine(output,"failure.png"));}
+                            }
+                            Check(frame!=null,selectionMode?"probe follows selected cell":"probe follows pointer");rect=(Rectangle)Field(frame,"Cell");
                             nativeTimes.Add((int)Field(frame,"ElapsedMicroseconds")/1000.0);
                             Rectangle expected=new Rectangle(grid.Left,rect.Top,grid.Width,rect.Height);
                             bool rendered=false;
@@ -113,23 +126,29 @@ class HoverGeometryTests
                         Check(grid.Contains(rect),"rectangle inside grid mode="+mode);
                         foreach(Point corner in new[]{new Point(rect.Left+1,rect.Top+1),new Point(rect.Right-2,rect.Bottom-2)})
                             Check(Matches(window,corner,row,column),"corner matches target mode="+mode+" point="+point+" rect="+rect+" row="+row+" col="+column+" corner="+corner);
+                        if(selectionMode && packetMode)
+                        {
+                            Point away=new Point(grid.Left+70,grid.Bottom-80);SetCursorPos(away.X,away.Y);Thread.Sleep(100);
+                            object stable=read.Invoke(packet,null);
+                            Check(stable!=null && (bool)Field(stable,"Visible") && (Rectangle)Field(stable,"Cell")==rect && (int)Field(stable,"TargetRow")==row && (int)Field(stable,"TargetColumn")==column,"pointer movement preserves selected cross mode="+mode);
+                        }
                         // Move to an adjacent cell and return repeatedly to exercise the cache.
                     }
                     finally { Release(merged);Release(cell); }
                 }
                 Check(times.Count>=20,"enough geometry samples");times.Sort();
                 string line="mode="+mode+" samples="+times.Count+" median_ms="+times[times.Count/2].ToString("F2")+" p95_ms="+times[(int)((times.Count-1)*0.95)].ToString("F2")+" max_ms="+times[times.Count-1].ToString("F2")+" merged="+mergedChecks;
-                if(packetMode) { line+=" native_sample_median_ms="+Median(nativeTimes).ToString("F2");Check(times[times.Count/2]<200,"hover median latency below 200 ms"); }
+                if(packetMode) { line+=" native_sample_median_ms="+Median(nativeTimes).ToString("F2");Check(times[times.Count/2]<(selectionMode?350:200),"highlight median latency within budget"); }
                 report.Add(line);Console.WriteLine(line);
             }
-            report.Add("PASS "+checks+" geometry checks; packet="+packetMode);File.WriteAllLines(Path.Combine(output,"report.txt"),report);Console.WriteLine(report[report.Count-1]);return 0;
+            report.Add("PASS "+checks+" geometry checks; packet="+packetMode+" selection="+selectionMode);File.WriteAllLines(Path.Combine(output,"report.txt"),report);Console.WriteLine(report[report.Count-1]);return 0;
         }
         catch(Exception ex){Console.Error.WriteLine(ex);File.WriteAllText(Path.Combine(output,"error.txt"),ex.ToString());return 1;}
         finally
         {
             if(originalSettings!=null && addin!=null)
             {
-                try { dynamic bridge=addin.Object;bridge.OnToggleHover(null,originalSettings.HoverEnabled);Release(bridge);Thread.Sleep(200); } catch { }
+                try { dynamic bridge=addin.Object;bridge.OnToggleHover(null,originalSettings.HoverEnabled);bridge.OnSetMode(null,(int)originalSettings.Mode);Release(bridge);Thread.Sleep(300); } catch { }
             }
             if(packet!=null)packet.Dispose();
             try{if(book!=null)book.Close(false);}catch{}try{if(app!=null)app.Quit();}catch{}

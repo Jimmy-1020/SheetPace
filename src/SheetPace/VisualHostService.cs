@@ -65,7 +65,7 @@ namespace SheetPace
             { runtime = instance; context = loop; Text = "SheetPace Visual Host"; ShowInTaskbar = false; FormBorderStyle = FormBorderStyle.None; }
             protected override void WndProc(ref Message message)
             {
-                if (message.Msg >= 0x8001 && message.Msg <= 0x8004)
+                if (message.Msg >= 0x8001 && message.Msg <= 0x8005)
                 {
                     switch (message.Msg)
                     {
@@ -73,6 +73,7 @@ namespace SheetPace
                         case 0x8002: runtime.OnSettings(null); break;
                         case 0x8003: runtime.OnHelp(null); break;
                         case 0x8004: runtime.OnToggleHover(null, message.LParam != IntPtr.Zero); break;
+                        case 0x8005: runtime.OnSetMode(null, message.LParam.ToInt32()); break;
                     }
                     return;
                 }

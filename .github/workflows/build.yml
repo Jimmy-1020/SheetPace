@@ -26,13 +26,13 @@ jobs:
       - name: Installer payload and registration plan
         shell: pwsh
         run: |
-          $check = Start-Process ./dist/SheetPace-Setup-1.0.2.exe -ArgumentList '/selftest "${{ github.workspace }}/tests/output/installer"' -Wait -PassThru
+          $check = Start-Process ./dist/SheetPace-Setup-1.0.3.exe -ArgumentList '/selftest "${{ github.workspace }}/tests/output/installer"' -Wait -PassThru
           if ($check.ExitCode -ne 0) { throw "Installer selftest failed" }
       - uses: actions/upload-artifact@v4
         with:
           name: SheetPace-Windows
           path: |
-            dist/SheetPace-Setup-1.0.2.exe
+            dist/SheetPace-Setup-1.0.3.exe
             dist/SheetPace.dll
             dist/SheetPace.NativeMenu.exe
             dist/SheetPace.VisualHost.exe

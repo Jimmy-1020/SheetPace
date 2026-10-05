@@ -4,9 +4,11 @@ using System.Globalization;
 using System.IO;
 namespace SheetPace
 {
+    public enum HighlightMode { ClickSelection = 0, FollowMouse = 1 }
     public sealed class Settings
     {
         public bool HoverEnabled = true;
+        public HighlightMode Mode = HighlightMode.ClickSelection;
         public bool NativeCountsEnabled = true;
         public Color HighlightColor = Color.FromArgb(65, 145, 245);
         public int Transparency = 82;
@@ -23,7 +25,8 @@ namespace SheetPace
                 {
                     int equals = line.IndexOf('='); if (equals < 0) continue;
                     string key = line.Substring(0, equals), value = line.Substring(equals + 1);
-                    bool flag; int number;
+                    bool flag; int number; HighlightMode mode;
+                    if (key == "Mode" && Enum.TryParse(value, out mode) && Enum.IsDefined(typeof(HighlightMode), mode)) result.Mode = mode;
                     if (key == "HoverEnabled" && bool.TryParse(value, out flag)) result.HoverEnabled = flag;
                     if (key == "NativeCountsEnabled" && bool.TryParse(value, out flag)) result.NativeCountsEnabled = flag;
                     if (key == "Transparency" && int.TryParse(value, out number)) result.Transparency = Math.Max(0, Math.Min(100, number));
@@ -38,7 +41,7 @@ namespace SheetPace
         {
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path)));
             string temp = path + ".tmp";
-            File.WriteAllLines(temp, new string[] { "HoverEnabled=" + HoverEnabled, "NativeCountsEnabled=" + NativeCountsEnabled,
+            File.WriteAllLines(temp, new string[] { "HoverEnabled=" + HoverEnabled, "NativeCountsEnabled=" + NativeCountsEnabled, "Mode=" + Mode,
                 "Transparency=" + Transparency, "Color=" + HighlightColor.ToArgb().ToString("X8", CultureInfo.InvariantCulture) });
             if (File.Exists(path)) File.Replace(temp, path, null); else File.Move(temp, path);
         }

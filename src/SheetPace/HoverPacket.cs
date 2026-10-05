@@ -7,8 +7,9 @@ namespace SheetPace
 {
     internal sealed class HoverFrame
     {
-        internal int Sequence, Row, Column, ElapsedMicroseconds, Timestamp;
-        internal bool Visible, FilterHeader;
+        internal int Sequence, Row, Column, TargetRow, TargetColumn, ElapsedMicroseconds, Timestamp;
+        internal bool Visible, PointerValid, FilterHeader;
+        internal HighlightMode Mode;
         internal IntPtr Window;
         internal Point Pointer;
         internal Rectangle Grid, Cell;
@@ -39,6 +40,7 @@ namespace SheetPace
             view.Write(64, frame.FilterHeader ? 1 : 0); view.Write(68, frame.ElapsedMicroseconds); view.Write(72, frame.Timestamp);
             byte[] name = new byte[64]; byte[] text = Encoding.Unicode.GetBytes(frame.SheetName ?? "");
             Buffer.BlockCopy(text, 0, name, 0, Math.Min(text.Length, 62)); view.WriteArray(80, name, 0, name.Length);
+            view.Write(76, frame.PointerValid ? 1 : 0); view.Write(144, frame.TargetRow); view.Write(148, frame.TargetColumn); view.Write(152, (int)frame.Mode);
             Thread.MemoryBarrier(); view.Write(0, sequence);
         }
         private void WriteRectangle(int offset, Rectangle rect)
@@ -55,7 +57,8 @@ namespace SheetPace
                 HoverFrame frame = new HoverFrame { Sequence = before, Visible = view.ReadInt32(4) != 0, Window = new IntPtr(view.ReadInt64(8)),
                     Row = view.ReadInt32(16), Column = view.ReadInt32(20), Pointer = new Point(view.ReadInt32(24), view.ReadInt32(28)),
                     Grid = ReadRectangle(32), Cell = ReadRectangle(48), FilterHeader = view.ReadInt32(64) != 0,
-                    ElapsedMicroseconds = view.ReadInt32(68), Timestamp = view.ReadInt32(72) };
+                    ElapsedMicroseconds = view.ReadInt32(68), Timestamp = view.ReadInt32(72), PointerValid = view.ReadInt32(76) != 0,
+                    TargetRow = view.ReadInt32(144), TargetColumn = view.ReadInt32(148), Mode = (HighlightMode)view.ReadInt32(152) };
                 byte[] text = new byte[64]; view.ReadArray(80, text, 0, text.Length); frame.SheetName = Encoding.Unicode.GetString(text).TrimEnd((char)0);
                 Thread.MemoryBarrier(); if (before == view.ReadInt32(0)) return frame;
             }

@@ -61,6 +61,36 @@ class InstalledStartupTest
         if(xLeft<0 || xRight<0)throw new Exception("Cannot hit-test target column");
         return new POINT {X=arrow?xRight-7:(xLeft+xRight)/2,Y=middle};
     }
+    static bool CrossAt(uint pid,POINT point)
+    {
+        for(int attempt=0;attempt<80;attempt++)
+        {
+            IntPtr row=Window(pid,"SheetPace Hover Overlay",true),column=Window(pid,"SheetPace Hover Overlay Column Above",true);RECT r,c;
+            if(row!=IntPtr.Zero && column!=IntPtr.Zero && GetWindowRect(row,out r) && GetWindowRect(column,out c) && point.Y>=r.T && point.Y<r.B && point.X>=c.L && point.X<c.R)return true;
+            Thread.Sleep(50);
+        }
+        return false;
+    }
+    static void ClickControl(IntPtr parent,string title)
+    {
+        IntPtr target=IntPtr.Zero;
+        EnumChildWindows(parent,delegate(IntPtr child,IntPtr unused){if(Title(child)==title){target=child;return false;}return true;},IntPtr.Zero);
+        Check(target!=IntPtr.Zero,"settings control exists: "+title);PostMessage(target,0xF5,IntPtr.Zero,IntPtr.Zero);Thread.Sleep(200);
+    }
+    static void ShowRibbon(IntPtr main)
+    {
+        var root=System.Windows.Automation.AutomationElement.FromHandle(main);
+        var tab=root.FindFirst(System.Windows.Automation.TreeScope.Descendants,new System.Windows.Automation.AndCondition(
+            new System.Windows.Automation.PropertyCondition(System.Windows.Automation.AutomationElement.NameProperty,"SheetPace"),
+            new System.Windows.Automation.PropertyCondition(System.Windows.Automation.AutomationElement.ControlTypeProperty,System.Windows.Automation.ControlType.TabItem)));
+        Check(tab!=null,"SheetPace Ribbon tab exists");
+        object pattern;
+        if(tab.TryGetCurrentPattern(System.Windows.Automation.SelectionItemPattern.Pattern,out pattern))((System.Windows.Automation.SelectionItemPattern)pattern).Select();
+        else if(tab.TryGetCurrentPattern(System.Windows.Automation.InvokePattern.Pattern,out pattern))((System.Windows.Automation.InvokePattern)pattern).Invoke();
+        else throw new Exception("Cannot activate SheetPace tab");
+        Thread.Sleep(300);
+        Check(root.FindFirst(System.Windows.Automation.TreeScope.Descendants,new System.Windows.Automation.PropertyCondition(System.Windows.Automation.AutomationElement.NameProperty,"光影设置"))!=null,"renamed settings button appears on Ribbon");
+    }
     static IntPtr WaitWindow(uint pid,string title)
     {
         for(int i=0;i<80;i++){IntPtr window=Window(pid,title,true);if(window!=IntPtr.Zero)return window;Thread.Sleep(100);}
@@ -85,7 +115,7 @@ class InstalledStartupTest
         string originalHash=Hash(source),copy=Path.Combine(output,"Startup-TestCopy.xlsx");File.Copy(source,copy,true);
         File.WriteAllText(Path.Combine(output,"started.txt"),DateTime.Now.ToString("o"));
         IntPtr previous=GetForegroundWindow();POINT pointer;GetCursorPos(out pointer);
-        dynamic app=null,book=null,sheet=null,addin=null,native=null;Process process=null;bool closed=false,restoreHover=false,originalHover=false;
+        dynamic app=null,book=null,sheet=null,addin=null,native=null;Process process=null;bool closed=false,restoreHover=false,originalHover=false;int originalMode=0;
         try
         {
             string exe,keyPath=String.Join(((char)92).ToString(),new[]{"Software","Microsoft","Windows","CurrentVersion","App Paths","excel.exe"});
@@ -118,26 +148,37 @@ class InstalledStartupTest
             {
             dynamic bridge=addin.Object;
             uint visualPid=(uint)(int)bridge.VisualHostProcessId;
-            originalHover=(bool)bridge.GetHoverPressed(null);bridge.OnToggleHover(null,true);restoreHover=true;
-            Marshal.ReleaseComObject(bridge);Thread.Sleep(250);
+            originalHover=(bool)bridge.GetHoverPressed(null);originalMode=(int)bridge.GetHighlightMode(null);bridge.OnToggleHover(null,true);bridge.OnSetMode(null,0);restoreHover=true;
+            Marshal.ReleaseComObject(bridge);Thread.Sleep(1200);
             Check(visualPid>0 && visualPid!=pid,"visuals run in separate process");
             string diagnostics=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"SheetPace","diagnostics.log");
             Check(File.ReadAllText(diagnostics).Contains("PID="+pid+" Ribbon GetCustomUI"),"Excel requested SheetPace Ribbon XML");
+            ShowRibbon(main);Screenshot(main,Path.Combine(output,"ribbon.png"));
             POINT hoverPoint=CellPoint(app,main,8,7,false);SetForegroundWindow(main);SetCursorPos(hoverPoint.X,hoverPoint.Y);
-            bool hoverAtTarget=false;
-            for(int attempt=0;attempt<80;attempt++)
-            {
-                IntPtr rowWindow=Window(visualPid,"SheetPace Hover Overlay",true),columnWindow=Window(visualPid,"SheetPace Hover Overlay Column Above",true);RECT rowBounds,columnBounds;
-                if(rowWindow!=IntPtr.Zero && columnWindow!=IntPtr.Zero && GetWindowRect(rowWindow,out rowBounds) && GetWindowRect(columnWindow,out columnBounds) && hoverPoint.Y>=rowBounds.T && hoverPoint.Y<rowBounds.B && hoverPoint.X>=columnBounds.L && hoverPoint.X<columnBounds.R){hoverAtTarget=true;break;}
-                Thread.Sleep(50);
-            }
-            Check(hoverAtTarget,"hover strips align with requested pointer cell");
+            mouse_event(2,0,0,0,UIntPtr.Zero);Thread.Sleep(40);mouse_event(4,0,0,0,UIntPtr.Zero);
+            Check(CrossAt(visualPid,hoverPoint),"selected cross aligns with physically clicked cell");
+            POINT away=CellPoint(app,main,12,9,false);SetCursorPos(away.X,away.Y);Thread.Sleep(300);
+            Check(CrossAt(visualPid,hoverPoint),"moving mouse preserves selected cross");
             Screenshot(main,Path.Combine(output,"hover.png"));
+            dynamic enabledCheck=addin.Object;enabledCheck.OnToggleHover(null,false);Thread.Sleep(500);
+            Check(Window(visualPid,"SheetPace Hover Overlay",true)==IntPtr.Zero,"Ribbon switch disables cross immediately");
+            enabledCheck.OnToggleHover(null,true);Marshal.ReleaseComObject(enabledCheck);Thread.Sleep(1200);
+            Check(CrossAt(visualPid,hoverPoint),"Ribbon switch restores selected cross");
             if(args.Length>2 && args[2]=="--dialogs")
             {
                 dynamic controller=addin.Object;controller.OnSettings(null);
                 IntPtr settingsWindow=WaitWindow(visualPid,"SheetPace · 光影设置");Check(settingsWindow!=IntPtr.Zero,"Ribbon settings callback opens visual host dialog");
+                Thread.Sleep(350);Screenshot(settingsWindow,Path.Combine(output,"settings.png"));
+                ClickControl(settingsWindow,"鼠标跟随");ClickControl(settingsWindow,"保存设置");Thread.Sleep(1200);
+                Check((int)controller.GetHighlightMode(null)==1,"settings saves mouse-follow mode");SetForegroundWindow(main);SetCursorPos(away.X,away.Y);
+                Check(CrossAt(visualPid,away),"mouse-follow mode tracks pointer without clicking");Screenshot(main,Path.Combine(output,"follow.png"));
+                controller.OnSettings(null);settingsWindow=WaitWindow(visualPid,"SheetPace · 光影设置");
+                ClickControl(settingsWindow,"点击选中（默认）");ClickControl(settingsWindow,"保存设置");Thread.Sleep(1200);
+                Check((int)controller.GetHighlightMode(null)==0,"settings saves click-selection mode");SetForegroundWindow(main);
+                Check(CrossAt(visualPid,hoverPoint),"switching back restores selected cell cross");
+                controller.OnSettings(null);settingsWindow=WaitWindow(visualPid,"SheetPace · 光影设置");ClickControl(settingsWindow,"鼠标跟随");
                 PostMessage(settingsWindow,0x10,IntPtr.Zero,IntPtr.Zero);Thread.Sleep(500);
+                Check((int)controller.GetHighlightMode(null)==0,"cancelled mode change leaves saved selection mode");
                 dynamic valueCell=sheet.Range["F6"];valueCell.Select();Marshal.ReleaseComObject(valueCell);controller.OnShowFilter(null);
                 IntPtr filterWindow=WaitWindow(visualPid,"SheetPace · 计数筛选");Check(filterWindow!=IntPtr.Zero,"Ribbon filter callback opens visual host dialog");
                 PostMessage(filterWindow,0x10,IntPtr.Zero,IntPtr.Zero);Thread.Sleep(500);Marshal.ReleaseComObject(controller);SetForegroundWindow(main);
@@ -174,10 +215,10 @@ class InstalledStartupTest
             if(args.Length<3 || args[2]!="--no-reconnect")
             {
             addin.Connect=false;Thread.Sleep(400);Check(!(bool)addin.Connect,"host COM disconnection succeeds");
-            addin.Connect=true;Thread.Sleep(1000);Check((bool)addin.Connect,"host COM reconnection succeeds");
+            addin.Connect=true;Thread.Sleep(1000);Check((bool)addin.Connect,"host COM reconnection succeeds");dynamic modeCheck=addin.Object;Check((int)modeCheck.GetHighlightMode(null)==0,"click-selection mode persists across add-in reconnect");Marshal.ReleaseComObject(modeCheck);
             }
             }
-            if(restoreHover){dynamic toggle=addin.Object;toggle.OnToggleHover(null,originalHover);Marshal.ReleaseComObject(toggle);Thread.Sleep(200);restoreHover=false;}
+            if(restoreHover){dynamic toggle=addin.Object;toggle.OnToggleHover(null,originalHover);toggle.OnSetMode(null,originalMode);Marshal.ReleaseComObject(toggle);Thread.Sleep(200);restoreHover=false;}
             GC.Collect();GC.WaitForPendingFinalizers();
             File.WriteAllLines(Path.Combine(output,"excel-modules-before-quit.txt"),GetModules(process));
             book.Close(false);app.Quit();closed=true;
@@ -190,7 +231,7 @@ class InstalledStartupTest
         catch(Exception ex){Console.Error.WriteLine(ex);File.WriteAllText(Path.Combine(output,"error.txt"),ex.ToString());return 1;}
         finally
         {
-            if(restoreHover && addin!=null){try{dynamic toggle=addin.Object;toggle.OnToggleHover(null,originalHover);Marshal.ReleaseComObject(toggle);Thread.Sleep(200);}catch{}}
+            if(restoreHover && addin!=null){try{dynamic toggle=addin.Object;toggle.OnToggleHover(null,originalHover);toggle.OnSetMode(null,originalMode);Marshal.ReleaseComObject(toggle);Thread.Sleep(200);}catch{}}
             if(!closed){try{if(book!=null)book.Close(false);}catch{}try{if(app!=null)app.Quit();}catch{}}
             SetCursorPos(pointer.X,pointer.Y);if(previous!=IntPtr.Zero)SetForegroundWindow(previous);
         }

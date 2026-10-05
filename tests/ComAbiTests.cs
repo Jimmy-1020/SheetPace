@@ -43,6 +43,8 @@ class ComAbiTests
             XmlDocument document = new XmlDocument(); document.LoadXml(Marshal.PtrToStringBSTR(xml));
             Check(document.DocumentElement.LocalName == "customUI", "native Ribbon vtable slot 7 returns valid XML BSTR");
             Check(document.OuterXml.Contains("sheetpaceTab"), "native Ribbon contains SheetPace tab");
+            Check(document.OuterXml.Contains("label=\"光影设置\"") && !document.OuterXml.Contains("label=\"颜色与透明度\""), "Ribbon settings label renamed");
+            Check(document.OuterXml.Contains("getImage=\"GetHoverImage\"") && document.OuterXml.Contains("getImage=\"GetSettingsImage\""), "Ribbon uses dedicated icons for both buttons");
             extensibility = Marshal.GetComInterfaceForObject(addin, typeof(IDTExtensibility2));
             foreach (int slot in new[] { 9, 10, 11 })
             {
