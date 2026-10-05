@@ -74,7 +74,7 @@ namespace SheetPaceInstaller
                 Register(InstallPath, "");
                 using (RegistryKey key = Registry.CurrentUser.CreateSubKey(UninstallKey))
                 {
-                    key.SetValue("DisplayName", "SheetPace — Excel 筛选计数与行列定位"); key.SetValue("DisplayVersion", "1.0.1");
+                    key.SetValue("DisplayName", "SheetPace — Excel 筛选计数与行列定位"); key.SetValue("DisplayVersion", "1.0.2");
                     key.SetValue("Publisher", "SheetPace"); key.SetValue("InstallLocation", InstallPath);
                     key.SetValue("DisplayIcon", uninstall + ",0"); key.SetValue("UninstallString", "\"" + uninstall + "\" /uninstall");
                     key.SetValue("NoModify", 1, RegistryValueKind.DWord); key.SetValue("NoRepair", 1, RegistryValueKind.DWord);

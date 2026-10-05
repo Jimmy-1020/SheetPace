@@ -85,7 +85,7 @@ class InstalledStartupTest
         string originalHash=Hash(source),copy=Path.Combine(output,"Startup-TestCopy.xlsx");File.Copy(source,copy,true);
         File.WriteAllText(Path.Combine(output,"started.txt"),DateTime.Now.ToString("o"));
         IntPtr previous=GetForegroundWindow();POINT pointer;GetCursorPos(out pointer);
-        dynamic app=null,book=null,sheet=null,addin=null,native=null;Process process=null;bool closed=false;
+        dynamic app=null,book=null,sheet=null,addin=null,native=null;Process process=null;bool closed=false,restoreHover=false,originalHover=false;
         try
         {
             string exe,keyPath=String.Join(((char)92).ToString(),new[]{"Software","Microsoft","Windows","CurrentVersion","App Paths","excel.exe"});
@@ -118,12 +118,20 @@ class InstalledStartupTest
             {
             dynamic bridge=addin.Object;
             uint visualPid=(uint)(int)bridge.VisualHostProcessId;
-            Marshal.ReleaseComObject(bridge);
+            originalHover=(bool)bridge.GetHoverPressed(null);bridge.OnToggleHover(null,true);restoreHover=true;
+            Marshal.ReleaseComObject(bridge);Thread.Sleep(250);
             Check(visualPid>0 && visualPid!=pid,"visuals run in separate process");
             string diagnostics=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"SheetPace","diagnostics.log");
             Check(File.ReadAllText(diagnostics).Contains("PID="+pid+" Ribbon GetCustomUI"),"Excel requested SheetPace Ribbon XML");
             POINT hoverPoint=CellPoint(app,main,8,7,false);SetForegroundWindow(main);SetCursorPos(hoverPoint.X,hoverPoint.Y);
-            Check(WaitWindow(visualPid,"SheetPace Hover Overlay")!=IntPtr.Zero,"hover overlay rendered by visual host");
+            bool hoverAtTarget=false;
+            for(int attempt=0;attempt<80;attempt++)
+            {
+                IntPtr rowWindow=Window(visualPid,"SheetPace Hover Overlay",true),columnWindow=Window(visualPid,"SheetPace Hover Overlay Column Above",true);RECT rowBounds,columnBounds;
+                if(rowWindow!=IntPtr.Zero && columnWindow!=IntPtr.Zero && GetWindowRect(rowWindow,out rowBounds) && GetWindowRect(columnWindow,out columnBounds) && hoverPoint.Y>=rowBounds.T && hoverPoint.Y<rowBounds.B && hoverPoint.X>=columnBounds.L && hoverPoint.X<columnBounds.R){hoverAtTarget=true;break;}
+                Thread.Sleep(50);
+            }
+            Check(hoverAtTarget,"hover strips align with requested pointer cell");
             Screenshot(main,Path.Combine(output,"hover.png"));
             if(args.Length>2 && args[2]=="--dialogs")
             {
@@ -169,6 +177,7 @@ class InstalledStartupTest
             addin.Connect=true;Thread.Sleep(1000);Check((bool)addin.Connect,"host COM reconnection succeeds");
             }
             }
+            if(restoreHover){dynamic toggle=addin.Object;toggle.OnToggleHover(null,originalHover);Marshal.ReleaseComObject(toggle);Thread.Sleep(200);restoreHover=false;}
             GC.Collect();GC.WaitForPendingFinalizers();
             File.WriteAllLines(Path.Combine(output,"excel-modules-before-quit.txt"),GetModules(process));
             book.Close(false);app.Quit();closed=true;
@@ -181,6 +190,7 @@ class InstalledStartupTest
         catch(Exception ex){Console.Error.WriteLine(ex);File.WriteAllText(Path.Combine(output,"error.txt"),ex.ToString());return 1;}
         finally
         {
+            if(restoreHover && addin!=null){try{dynamic toggle=addin.Object;toggle.OnToggleHover(null,originalHover);Marshal.ReleaseComObject(toggle);Thread.Sleep(200);}catch{}}
             if(!closed){try{if(book!=null)book.Close(false);}catch{}try{if(app!=null)app.Quit();}catch{}}
             SetCursorPos(pointer.X,pointer.Y);if(previous!=IntPtr.Zero)SetForegroundWindow(previous);
         }

@@ -36,6 +36,7 @@ namespace SheetPace
         [DllImport("user32.dll")] internal static extern bool UpdateLayeredWindow(IntPtr window, IntPtr destDC, ref POINT dest, ref SIZE size,
             IntPtr sourceDC, ref POINT source, int colorKey, ref BLENDFUNCTION blend, int flags);
         [DllImport("user32.dll")] internal static extern bool ShowWindow(IntPtr window, int command);
+        [DllImport("user32.dll")] internal static extern bool SetLayeredWindowAttributes(IntPtr window, uint color, byte alpha, uint flags);
         [StructLayout(LayoutKind.Sequential)] internal struct BITMAPINFO
         {
             public uint Size; public int Width, Height; public ushort Planes, BitCount;

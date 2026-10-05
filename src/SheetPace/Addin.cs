@@ -10,7 +10,11 @@ namespace SheetPace
         private dynamic app, ribbon;
         private Settings settings;
         private Timer timer;
-        private OverlayWindow hover, counts;
+        private CrossOverlay hover;
+        private OverlayWindow counts;
+        private HoverProbe hoverProbe;
+        private HoverPacket hoverPacket;
+        private string lastCountKey;
         private NativeFilterWatcher watcher;
         private uint process;
         private bool inTick, dialogOpen, wasPressed, nativeOpen;
@@ -21,7 +25,6 @@ namespace SheetPace
         private Point lastPoint, clickPoint;
         private bool clickPending, bridge;
         private VisualHostBridge visualHost;
-        private System.Threading.Timer settingsPoll;
         private DateTime settingsStamp;
         public int VisualHostProcessId { get { return visualHost == null ? 0 : visualHost.ProcessId; } }
         public string GetCustomUI(string ribbonID)
@@ -47,17 +50,19 @@ namespace SheetPace
                 if (bridge)
                 {
                     if (addInInst != null) { dynamic instance = addInInst; instance.Object = this; }
+                    hoverProbe = new HoverProbe(application, process, delegate { return settings != null && (settings.HoverEnabled || settings.NativeCountsEnabled); }, delegate { RefreshRibbonSettings(null); });
                     visualHost = new VisualHostBridge(hwnd, process);
                     settingsStamp = System.IO.File.Exists(Settings.DefaultPath) ? System.IO.File.GetLastWriteTimeUtc(Settings.DefaultPath) : DateTime.MinValue;
-                    settingsPoll = new System.Threading.Timer(RefreshRibbonSettings, null, 1000, 1000);
                     Log.Write("PID=" + process + " VisualHost=" + visualHost.ProcessId, null);
                     return;
                 }
                 // All windows and UI Automation live in the standalone STA visual host.
-                hover = new OverlayWindow { Text = "SheetPace Hover Overlay" };
+                hover = new CrossOverlay { Text = "SheetPace Hover Overlay" };
+                try { hoverPacket = new HoverPacket(process, false); }
+                catch (System.IO.FileNotFoundException) { /* Direct test connections can use the legacy geometry path. */ }
                 counts = new OverlayWindow { Text = "SheetPace Count Overlay" };
                 watcher = new NativeFilterWatcher(process);
-                timer = new Timer { Interval = 90 }; timer.Tick += Tick; timer.Start();
+                timer = new Timer { Interval = hoverPacket == null ? 90 : 33 }; timer.Tick += Tick; timer.Start();
                 Log.Write("SheetPace 已连接 Excel " + Convert.ToString(app.Version), null);
             }
             catch (Exception ex) { Log.Write("加载项初始化失败", ex); Stop(); }
@@ -125,7 +130,7 @@ namespace SheetPace
         public void OnHelp(object control)
         {
             if (bridge) { if (visualHost != null) visualHost.Send(3, 0); return; }
-            MessageBox.Show("1. 打开列标题的筛选按钮，支持的原生列表会显示数量标签。\n2. 选中目标列中的一个格子，点击“计数筛选”，可搜索、多选并按数量筛选。\n3. 鼠标移动到单元格即可显示行列光影。\n4. 点击“颜色与透明度”调整外观。\n\n计数排除标题，包含筛选区域内所有隐藏行；空白单独计数。\n原生菜单增强依赖 Office 的可访问性支持；不能识别时请使用计数筛选窗口。\n\n版本 1.0.1 · Windows Excel 2016 及以上\n诊断日志：" + Settings.DirectoryPath, "SheetPace 使用说明");
+            MessageBox.Show("1. 打开列标题的筛选按钮，支持的原生列表会显示数量标签。\n2. 选中目标列中的一个格子，点击“计数筛选”，可搜索、多选并按数量筛选。\n3. 鼠标移动到单元格即可显示行列光影。\n4. 点击“颜色与透明度”调整外观。\n\n计数排除标题，包含筛选区域内所有隐藏行；空白单独计数。\n原生菜单增强依赖 Office 的可访问性支持；不能识别时请使用计数筛选窗口。\n\n版本 1.0.2 · Windows Excel 2016 及以上\n诊断日志：" + Settings.DirectoryPath, "SheetPace 使用说明");
         }
         private void Tick(object sender, EventArgs args)
         {
@@ -141,7 +146,7 @@ namespace SheetPace
                 if ((buttonState & 1) != 0 || (pressed && !wasPressed)) { clickPoint = pointer; clickPending = true; }
                 if (pressed && !wasPressed && lastRow > 0) { pendingRow = lastRow; pendingColumn = lastColumn; }
                 wasPressed = pressed;
-                if (++tick % 3 == 0 && settings.NativeCountsEnabled && watcher != null) watcher.Request();
+                if (++tick % (hoverPacket == null ? 3 : 8) == 0 && settings.NativeCountsEnabled && watcher != null) watcher.Request();
                 FilterMenu menu = watcher == null ? null : watcher.Latest;
                 bool isMenu = menu != null && NativeMethods.IsWindow(menu.Window) && NativeMethods.IsWindowVisible(menu.Window) && unchecked(Environment.TickCount - (int)menu.Timestamp) < 1500;
                 if (isMenu && settings.NativeCountsEnabled)
@@ -150,7 +155,22 @@ namespace SheetPace
                     if (!nativeOpen) { PrepareNativeCount(menu); TraceNativeCount(menu); }
                     nativeOpen = true; DrawCounts(menu); return;
                 }
-                nativeOpen = false; counts.Hide();
+                nativeOpen = false; counts.Hide(); lastCountKey = null;
+                if (hoverPacket != null)
+                {
+                    HoverFrame frame = hoverPacket.Read();
+                    if (frame == null || !frame.Visible || unchecked(Environment.TickCount - frame.Timestamp) > 250)
+                    { hover.Hide(); hoverKey = null; return; }
+                    bool movedFrame = frame.Pointer != lastPoint || frame.Row != lastRow || frame.Column != lastColumn || frame.SheetName != lastSheet;
+                    steadyTicks = movedFrame ? 0 : steadyTicks + 1;
+                    lastRow = frame.Row; lastColumn = frame.Column; lastSheet = frame.SheetName; lastPoint = frame.Pointer;
+                    pendingRow = frame.Row; pendingColumn = frame.Column;
+                    if (settings.NativeCountsEnabled && frame.FilterHeader && (steadyTicks == 0 || steadyTicks == 3)) TryCountContext(frame.Row, frame.Column, false);
+                    if (!settings.HoverEnabled) { hover.Hide(); return; }
+                    string packetKey = frame.Window + ":" + frame.SheetName + ":" + frame.Grid + ":" + frame.Cell + ":" + settings.Alpha + ":" + settings.HighlightColor.ToArgb();
+                    if (hoverKey != packetKey || !hover.Visible) { hover.DrawCross(frame.Grid, frame.Cell, settings); hoverKey = packetKey; }
+                    return;
+                }
                 IntPtr main = new IntPtr((int)app.Hwnd);
                 // Do not draw over dialogs, ribbon, a different workbook window, or outside the cell grid.
                 if (NativeMethods.GetForegroundWindow() != main) { hover.Hide(); hoverKey = null; return; }
@@ -239,6 +259,14 @@ namespace SheetPace
         private void DrawCounts(FilterMenu menu)
         {
             if (countContext == null || countContext.Snapshot == null) { counts.Hide(); return; }
+            System.Text.StringBuilder key = new System.Text.StringBuilder(menu.Window + ":" + menu.Bounds);
+            foreach (FilterRow row in menu.Rows)
+            {
+                int value; countContext.Snapshot.TryGetCount(row.Name, row.Year, row.Month, out value);
+                key.Append("|").Append(row.Name).Append(row.Bounds).Append(row.Year).Append(row.Month).Append(value);
+            }
+            string renderedKey = key.ToString(); if (lastCountKey == renderedKey && counts.Visible) return;
+            lastCountKey = renderedKey;
             counts.Render(menu.Bounds, delegate(Graphics graphics)
             {
                 using (Font font = new Font("Microsoft YaHei UI", 8.5F))
@@ -262,10 +290,11 @@ namespace SheetPace
         private void DisposeContext() { if (countContext != null) { countContext.Dispose(); countContext = null; } }
         private void Stop()
         {
-            if (settingsPoll != null) { settingsPoll.Dispose(); settingsPoll = null; }
+            if (hoverProbe != null) { hoverProbe.Dispose(); hoverProbe = null; }
             if (visualHost != null) { visualHost.Dispose(); visualHost = null; }
             if (timer != null) { timer.Stop(); timer.Dispose(); timer = null; }
             if (watcher != null) { watcher.Dispose(); watcher = null; }
+            if (hoverPacket != null) { hoverPacket.Dispose(); hoverPacket = null; }
             if (hover != null) { hover.Dispose(); hover = null; }
             if (counts != null) { counts.Dispose(); counts = null; }
             DisposeContext(); ribbon = null; app = null;

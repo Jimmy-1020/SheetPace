@@ -4,6 +4,11 @@ using System.IO;
 using SheetPace;
 class CoreTests
 {
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)] struct Message
+    { public IntPtr Window; public uint Id; public UIntPtr WParam; public IntPtr LParam; public uint Time; public Point Pointer; public uint Private; }
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool PeekMessageW(out Message message,IntPtr window,uint first,uint last,uint flags);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern IntPtr DispatchMessageW(ref Message message);
+    static void Pump() { Message message;while(PeekMessageW(out message,IntPtr.Zero,0,0,1))DispatchMessageW(ref message); }
     static int checks;
     static void Check(bool condition, string name) { checks++; if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS " + name); }
     static object[,] Column(params object[] values) { object[,] data = new object[values.Length, 1]; for (int i = 0; i < values.Length; i++) data[i, 0] = values[i]; return data; }
@@ -62,6 +67,44 @@ class CoreTests
                 bool rejected = false; try { NativeMenuProtocol.Read(new BinaryReader(stream)); } catch (InvalidDataException) { rejected = true; }
                 Check(rejected, "helper rejects incompatible protocol");
             }
+            uint testProcess = 0x40000000u + (uint)System.Diagnostics.Process.GetCurrentProcess().Id;
+            using (HoverPacket writer = new HoverPacket(testProcess, true))
+            using (HoverPacket reader = new HoverPacket(testProcess, false))
+            {
+                Check(reader.Read() == null, "hover reader ignores uninitialized packet");
+                writer.Publish(new HoverFrame { Visible = true, Window = new IntPtr(123456), Row = 7, Column = -7,
+                    Pointer = new Point(7, -7), Grid = new Rectangle(7, 2, 3, 4), Cell = new Rectangle(5, 7, 8, 9),
+                    SheetName = "定位测试", FilterHeader = true, ElapsedMicroseconds = 1200, Timestamp = 9 });
+                HoverFrame received = reader.Read();
+                Check(received != null && received.Row == 7 && received.Column == -7 && received.Pointer == new Point(7, -7) && received.Grid.X == 7 && received.Cell.Y == 7 && received.SheetName == "定位测试" && received.FilterHeader && received.Window == new IntPtr(123456) && received.ElapsedMicroseconds == 1200, "hover packet geometry and metadata roundtrip");
+                System.Threading.Thread producer = new System.Threading.Thread(delegate()
+                {
+                    for (int i = 8; i < 5008; i++) writer.Publish(new HoverFrame { Visible = true, Row = i, Column = -i, Pointer = new Point(i, -i), Grid = new Rectangle(i, 2, 3, 4), Cell = new Rectangle(5, i, 8, 9) });
+                });
+                producer.Start(); bool coherent = true; int samples = 0;
+                while (producer.IsAlive)
+                {
+                    HoverFrame frame = reader.Read(); if (frame == null) continue; samples++;
+                    if (frame.Column != -frame.Row || frame.Pointer.X != frame.Row || frame.Pointer.Y != -frame.Row || frame.Grid.X != frame.Row || frame.Cell.Y != frame.Row) coherent = false;
+                }
+                producer.Join();
+                Check(coherent && samples > 0 && reader.Read().Row == 5007, "hover sequence protects concurrent readers from torn frames");
+            }
+            int refreshes = 0;
+            using (HoverProbe probe = new HoverProbe(new object(), testProcess, delegate { return false; }, delegate { refreshes++; }))
+            using (HoverPacket reader = new HoverPacket(testProcess, false))
+            {
+                System.Threading.Thread.Sleep(60); Pump();
+                HoverFrame frame = reader.Read();
+                Check(frame != null && !frame.Visible && frame.Timestamp != 0 && refreshes > 0, "native STA timer publishes hidden frame without Excel or forms");
+            }
+            using (HoverProbe probe = new HoverProbe(new object(), testProcess, delegate { return false; }, delegate { }))
+            using (HoverPacket reader = new HoverPacket(testProcess, false))
+            {
+                System.Threading.Thread.Sleep(60); Pump();
+                Check(reader.Read() != null, "native probe releases timer, class and mapping before reconnect");
+            }
+            Pump();
             Console.WriteLine("PASS " + checks + " checks"); return 0;
         }
         catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }

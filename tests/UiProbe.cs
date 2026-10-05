@@ -23,7 +23,7 @@ class UiProbe
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd,out uint pid);
     delegate bool EnumProc(IntPtr hwnd,IntPtr unused);
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc proc,IntPtr unused);
-    static Form Overlay(Connect addin,string name) { return (Form)typeof(Connect).GetField(name,BindingFlags.Instance|BindingFlags.NonPublic).GetValue(addin); }
+    static Form Overlay(Connect addin,string name) { object overlay=typeof(Connect).GetField(name,BindingFlags.Instance|BindingFlags.NonPublic).GetValue(addin);return overlay as Form ?? (Form)overlay.GetType().GetProperty("PrimaryWindow").GetValue(overlay,null); }
     static void Screenshot(IntPtr hwnd,string path)
     {
         RECT r; GetWindowRect(hwnd,out r); using(Bitmap b=new Bitmap(r.R-r.L,r.B-r.T))

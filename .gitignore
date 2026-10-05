@@ -15,3 +15,4 @@ dist/SheetPace.UiProbe.exe
 dist/SheetPace.WorkbookTest.exe
 dist/SheetPace.ComAbiTests*.exe
 dist/SheetPace.InstalledTests.exe
+dist/SheetPace.HoverTests.exe

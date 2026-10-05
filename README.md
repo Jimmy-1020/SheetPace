@@ -4,7 +4,7 @@ Windows Excel 插件：筛选值计数、鼠标行列光影，以及可调整的
 
 ## 安装
 
-下载 [SheetPace-Setup-1.0.1.exe](dist/SheetPace-Setup-1.0.1.exe)，保存工作簿并关闭所有 Excel 进程后双击安装。当前用户安装，无需管理员权限。重新打开 Excel，在功能区找到 **SheetPace**。已安装 1.0.0 时，直接运行 1.0.1 覆盖更新；请使用此 Setup 文件安装。
+下载 [SheetPace-Setup-1.0.2.exe](dist/SheetPace-Setup-1.0.2.exe)，保存工作簿并关闭所有 Excel 进程后双击安装。当前用户安装，无需管理员权限。重新打开 Excel，在功能区找到 **SheetPace**。已安装旧版时，直接运行 1.0.2 覆盖更新；请使用此 Setup 文件安装。
 
 - Windows 10 / 11，Microsoft Excel 桌面版，.NET Framework 4.8。
 - 使用 AnyCPU COM 类库，在 32 / 64 位注册视图分别注册。目标 Office 2016 及以上；目前实际测试为 64 位 Microsoft 365，其他版本和 32 位 Office 需要回归验证。
@@ -38,7 +38,7 @@ python scripts/build.py
 ./dist/SheetPace.Tests.exe tests/output/core
 ./dist/SheetPace.ComAbiTests.exe
 ./dist/SheetPace.ComAbiTests.x86.exe
-./dist/SheetPace-Setup-1.0.1.exe /selftest "$PWD/tests/output/installer"
+./dist/SheetPace-Setup-1.0.2.exe /selftest "$PWD/tests/output/installer"
 ./dist/SheetPace.ExcelTests.exe tests/output/excel
 ```
 
@@ -48,7 +48,7 @@ python scripts/build.py
 
 ## 排障
 
-若功能区未出现，在 Excel **文件 → 选项 → 加载项 → 管理 COM 加载项 → 转到** 中启用 SheetPace。1.0.1 修复了原版的 COM 加载接口和 Excel 退出异常，界面及菜单识别改为独立进程。更新安装会备份并恢复明确匹配 SheetPace 的禁用记录；若仍被禁用，检查“禁用项目”并重新启用。组织安全策略可能限制 COM 加载项；本版安装程序未签名。
+若功能区未出现，在 Excel **文件 → 选项 → 加载项 → 管理 COM 加载项 → 转到** 中启用 SheetPace。1.0.1 修复了原版的 COM 加载接口和 Excel 退出异常；1.0.2 将鼠标坐标查询改为 Excel 内部采样并缓存，只传输坐标，光影改为窄条窗口，减少移动时的延迟。界面及菜单识别在独立进程中运行。更新安装会备份并恢复明确匹配 SheetPace 的禁用记录；若仍被禁用，检查“禁用项目”并重新启用。组织安全策略可能限制 COM 加载项；本版安装程序未签名。
 
 设置及诊断日志：`%LOCALAPPDATA%/SheetPace/`。卸载保留设置和日志。安装程序不会自动关闭 Excel。
 

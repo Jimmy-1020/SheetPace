@@ -50,6 +50,14 @@ namespace SheetPace
                 finally { NativeMethods.SelectObject(mem, old); NativeMethods.DeleteObject(image); NativeMethods.DeleteDC(mem); NativeMethods.ReleaseDC(IntPtr.Zero, dc); }
             }
         }
+        public void Fill(Rectangle screen, Color color, int alpha)
+        {
+            if (screen.Width <= 0 || screen.Height <= 0 || alpha == 0) { Hide(); return; }
+            Color rgb = Color.FromArgb(color.R, color.G, color.B);
+            if (BackColor != rgb) BackColor = rgb;
+            NativeMethods.SetLayeredWindowAttributes(Handle, 0, (byte)alpha, 2);
+            NativeMethods.SetWindowPos(Handle, NativeMethods.HWND_TOPMOST, screen.X, screen.Y, screen.Width, screen.Height, NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_SHOWWINDOW);
+        }
         public void DrawCross(Rectangle grid, Rectangle cell, Settings settings)
         {
             if (settings.Alpha == 0) { Hide(); return; }
@@ -63,6 +71,26 @@ namespace SheetPace
                 }
             });
         }
+    }
+    internal sealed class CrossOverlay : IDisposable
+    {
+        private readonly OverlayWindow row = new OverlayWindow();
+        private readonly OverlayWindow above = new OverlayWindow();
+        private readonly OverlayWindow below = new OverlayWindow();
+        public string Text { set { row.Text = value; above.Text = value + " Column Above"; below.Text = value + " Column Below"; } }
+        public System.Windows.Forms.Form PrimaryWindow { get { return row; } }
+        public bool Visible { get { return row.Visible || above.Visible || below.Visible; } }
+        public void Hide() { row.Hide(); above.Hide(); below.Hide(); }
+        public void DrawCross(Rectangle grid, Rectangle cell, Settings settings)
+        {
+            Rectangle clipped = Rectangle.Intersect(grid, cell);
+            if (clipped.IsEmpty || settings.Alpha == 0) { Hide(); return; }
+            // Three disjoint strips avoid a full-grid bitmap and double opacity at the intersection.
+            row.Fill(new Rectangle(grid.Left, clipped.Top, grid.Width, clipped.Height), settings.HighlightColor, settings.Alpha);
+            above.Fill(new Rectangle(clipped.Left, grid.Top, clipped.Width, clipped.Top - grid.Top), settings.HighlightColor, settings.Alpha);
+            below.Fill(new Rectangle(clipped.Left, clipped.Bottom, clipped.Width, grid.Bottom - clipped.Bottom), settings.HighlightColor, settings.Alpha);
+        }
+        public void Dispose() { row.Dispose(); above.Dispose(); below.Dispose(); }
     }
     internal static class GridGeometry
     {
