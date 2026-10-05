@@ -18,6 +18,9 @@ namespace SheetPace
         }
         protected override void WndProc(ref Message message)
         {
+            // Decorative, click-through windows expose no interactive accessibility provider.
+            // This also prevents UI Automation from retaining managed providers at Office shutdown.
+            if (message.Msg == 0x3D) { message.Result = IntPtr.Zero; return; }
             if (message.Msg == 0x84) { message.Result = new IntPtr(-1); return; }
             if (message.Msg == 0x21) { message.Result = new IntPtr(3); return; }
             base.WndProc(ref message);

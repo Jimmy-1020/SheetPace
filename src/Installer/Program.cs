@@ -14,7 +14,7 @@ namespace SheetPaceInstaller
                 if (args.Length > 0 && args[0] == "/selftest")
                 { if (args.Length != 2) return 2; Engine.SelfTest(Path.GetFullPath(args[1])); return 0; }
                 if (args.Length > 0 && args[0] == "/extract")
-                { Engine.VerifyPayload(); Directory.CreateDirectory(args[1]); File.WriteAllBytes(Path.Combine(args[1], "SheetPace.dll"), Engine.Payload()); return 0; }
+                { Engine.VerifyPayload(); Directory.CreateDirectory(args[1]); File.WriteAllBytes(Path.Combine(args[1], "SheetPace.dll"), Engine.Payload()); File.WriteAllBytes(Path.Combine(args[1], "SheetPace.NativeMenu.exe"), Engine.HelperPayload()); File.WriteAllBytes(Path.Combine(args[1], "SheetPace.VisualHost.exe"), Engine.HostPayload()); return 0; }
                 if (args.Length > 0 && args[0] == "/install-quiet") { Engine.Install(); return 0; }
                 bool uninstall = args.Length > 0 && args[0] == "/uninstall";
                 using (SetupForm form = new SetupForm(uninstall)) Application.Run(form);
@@ -41,7 +41,7 @@ namespace SheetPaceInstaller
             FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; MinimizeBox = false;
             StartPosition = FormStartPosition.CenterScreen; AutoScaleMode = AutoScaleMode.Dpi;
             Label title = new Label { Text = "SheetPace", Font = new Font(Font.FontFamily, 27, FontStyle.Bold), ForeColor = Color.FromArgb(35, 105, 220), Location = new Point(28, 24), Size = new Size(520, 56) }; Controls.Add(title);
-            Controls.Add(new Label { Text = "Excel 筛选计数与行列定位", Font = new Font(Font.FontFamily, 13), Location = new Point(30, 88), Size = new Size(520, 36) });
+            Controls.Add(new Label { Text = "Excel 筛选计数与行列定位 · 1.0.1", Font = new Font(Font.FontFamily, 13), Location = new Point(30, 88), Size = new Size(520, 36) });
             Controls.Add(new Label { Text = remove ? "卸载将移除 Excel 加载项和程序文件。\n您的工作簿不会被修改，个人光影设置将保留。" : "• 筛选值数量：搜索、多选与次数统计\n• 鼠标行列光影：移动鼠标即可定位\n• 自定义颜色与透明度，实时预览\n\nWindows Excel 2016 及以上 · 32 / 64 位\n当前用户安装，无需管理员权限", Location = new Point(30, 140), Size = new Size(526, 170) });
             status = new Label { Text = "请先保存工作簿，并关闭所有 Excel 窗口。\n安装位置：" + Engine.InstallPath, ForeColor = Color.DimGray, Location = new Point(30, 310), Size = new Size(526, 74) }; Controls.Add(status);
             Button cancel = new Button { Text = "取消", Location = new Point(326, 396), Size = new Size(94, 36), FlatStyle = FlatStyle.Flat };

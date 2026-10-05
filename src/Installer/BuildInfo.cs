@@ -1,1 +1,1 @@
-namespace SheetPaceInstaller { internal static class BuildInfo { internal const string DllHash = "9124667a68fe93c5bbfc7708a3729ba7d76f1846abe1c3eae1b5060bd519216e"; } }
+namespace SheetPaceInstaller { internal static class BuildInfo { internal const string DllHash = "2599aad3050faa3aeb62bfbf8d19ef5d438c8cc6d00fa13b20420d05bc1aefb5"; internal const string HelperHash = "2b37c2835ad2ef16061c89e360f685fde4f8353b6ac9549fac2ff06c03d18b6f"; internal const string HostHash = "00aa33429c79d872d535f2a768faaf9ff5bd93349c6040159681e340516dd1e7"; } }

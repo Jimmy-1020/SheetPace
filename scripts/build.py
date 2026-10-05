@@ -20,10 +20,16 @@ def main():
     uia = [FRAMEWORK / "WPF" / (n + ".dll") for n in ["UIAutomationClient", "UIAutomationTypes", "WindowsBase"]]
     dll = DIST / "SheetPace.dll"
     compile_cs(dll, sorted((ROOT / "src/SheetPace").glob("*.cs")), refs + uia, ["/target:library"])
+    helper = DIST / "SheetPace.NativeMenu.exe"
+    compile_cs(helper, sorted((ROOT / "src/NativeMenu").glob("*.cs")), refs + [dll], ["/target:exe"])
+    host = DIST / "SheetPace.VisualHost.exe"
+    compile_cs(host, sorted((ROOT / "src/VisualHost").glob("*.cs")), refs + [dll], ["/target:winexe"])
     digest = hashlib.sha256(dll.read_bytes()).hexdigest()
-    (ROOT / "src/Installer/BuildInfo.cs").write_text('namespace SheetPaceInstaller { internal static class BuildInfo { internal const string DllHash = "' + digest + '"; } }', encoding="utf-8")
-    compile_cs(DIST / "SheetPace-Setup-1.0.0.exe", sorted((ROOT / "src/Installer").glob("*.cs")), refs,
-               ["/target:winexe", "/win32manifest:" + str(ROOT / "src/Installer/app.manifest"), "/resource:" + str(dll) + ",SheetPace.dll"])
+    helper_digest = hashlib.sha256(helper.read_bytes()).hexdigest()
+    host_digest = hashlib.sha256(host.read_bytes()).hexdigest()
+    (ROOT / "src/Installer/BuildInfo.cs").write_text('namespace SheetPaceInstaller { internal static class BuildInfo { internal const string DllHash = "' + digest + '"; internal const string HelperHash = "' + helper_digest + '"; internal const string HostHash = "' + host_digest + '"; } }', encoding="utf-8")
+    compile_cs(DIST / "SheetPace-Setup-1.0.1.exe", sorted((ROOT / "src/Installer").glob("*.cs")), refs,
+               ["/target:winexe", "/win32manifest:" + str(ROOT / "src/Installer/app.manifest"), "/resource:" + str(dll) + ",SheetPace.dll", "/resource:" + str(helper) + ",SheetPace.NativeMenu.exe", "/resource:" + str(host) + ",SheetPace.VisualHost.exe"])
     if (ROOT / "tests/CoreTests.cs").exists():
         compile_cs(DIST / "SheetPace.Tests.exe", [ROOT / "tests/CoreTests.cs"], refs + uia + [dll], ["/target:exe"])
     if (ROOT / "tests/ExcelIntegration.cs").exists():
@@ -32,7 +38,10 @@ def main():
         compile_cs(DIST / "SheetPace.UiProbe.exe", [ROOT / "tests/UiProbe.cs"], refs + uia + [dll], ["/target:exe"])
     if (ROOT / "tests/UserWorkbookTest.cs").exists():
         compile_cs(DIST / "SheetPace.WorkbookTest.exe", [ROOT / "tests/UserWorkbookTest.cs"], refs + uia + [dll], ["/target:exe"])
-    hashes = [hashlib.sha256(p.read_bytes()).hexdigest() + "  " + p.name for p in sorted(DIST.glob("SheetPace-Setup-*.exe"))] + [digest + "  SheetPace.dll"]
+    compile_cs(DIST / "SheetPace.InstalledTests.exe", [ROOT / "tests/InstalledStartupTest.cs"], refs + uia, ["/target:exe"])
+    compile_cs(DIST / "SheetPace.ComAbiTests.exe", [ROOT / "tests/ComAbiTests.cs"], refs + [dll], ["/target:exe"])
+    compile_cs(DIST / "SheetPace.ComAbiTests.x86.exe", [ROOT / "tests/ComAbiTests.cs"], refs + [dll], ["/target:exe", "/platform:x86"])
+    hashes = [hashlib.sha256(p.read_bytes()).hexdigest() + "  " + p.name for p in sorted(DIST.glob("SheetPace-Setup-*.exe"))] + [digest + "  SheetPace.dll", helper_digest + "  SheetPace.NativeMenu.exe", host_digest + "  SheetPace.VisualHost.exe"]
     (DIST / "SHA256SUMS.txt").write_text(chr(10).join(hashes) + chr(10), encoding="utf-8")
     print("Build complete:", DIST)
 if __name__ == "__main__": main()

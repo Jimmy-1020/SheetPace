@@ -4,7 +4,7 @@ Windows Excel 插件：筛选值计数、鼠标行列光影，以及可调整的
 
 ## 安装
 
-下载 [SheetPace-Setup-1.0.0.exe](dist/SheetPace-Setup-1.0.0.exe)，保存工作簿并关闭所有 Excel 进程后双击安装。当前用户安装，无需管理员权限。重新打开 Excel，在功能区找到 **SheetPace**。
+下载 [SheetPace-Setup-1.0.1.exe](dist/SheetPace-Setup-1.0.1.exe)，保存工作簿并关闭所有 Excel 进程后双击安装。当前用户安装，无需管理员权限。重新打开 Excel，在功能区找到 **SheetPace**。已安装 1.0.0 时，直接运行 1.0.1 覆盖更新；请使用此 Setup 文件安装。
 
 - Windows 10 / 11，Microsoft Excel 桌面版，.NET Framework 4.8。
 - 使用 AnyCPU COM 类库，在 32 / 64 位注册视图分别注册。目标 Office 2016 及以上；目前实际测试为 64 位 Microsoft 365，其他版本和 32 位 Office 需要回归验证。
@@ -36,17 +36,19 @@ Excel 没有公开接口让插件修改原生筛选列表的渲染。本插件�
 ```powershell
 python scripts/build.py
 ./dist/SheetPace.Tests.exe tests/output/core
-./dist/SheetPace-Setup-1.0.0.exe /selftest "$PWD/tests/output/installer"
+./dist/SheetPace.ComAbiTests.exe
+./dist/SheetPace.ComAbiTests.x86.exe
+./dist/SheetPace-Setup-1.0.1.exe /selftest "$PWD/tests/output/installer"
 ./dist/SheetPace.ExcelTests.exe tests/output/excel
 ```
 
-构建使用 Windows 自带 .NET Framework 编译器，Python 3.8 及以上，不联网、不恢复 NuGet。产物位于 `dist/`，安装器内嵌 DLL。`SHA256SUMS.txt` 可用于校验文件完整性。
+构建使用 Windows 自带 .NET Framework 编译器，Python 3.8 及以上，不联网、不恢复 NuGet。产物位于 `dist/`，安装器内嵌插件 DLL、独立界面进程和原生菜单识别进程，自动安装全部文件。`SHA256SUMS.txt` 可用于校验文件完整性。
 
-`/selftest` 验证内嵌文件、COM 类和注册/卸载计划，**不写入注册表**。Excel 集成测试需要安装 Excel，仅读写自己创建的测试工作簿。`SheetPace.UiProbe.exe` 是交互显示测试，会暂时打开自己的 Excel 窗口并移动鼠标，结束后关闭该实例；不要在正在操作 Excel 时运行。
+`/selftest` 验证三个内嵌文件、COM 类和注册/卸载计划，**不写入注册表**。Excel 集成测试需要安装 Excel，仅读写自己创建的测试工作簿。`SheetPace.InstalledTests.exe` 验证安装后自动加载、真实文件启动、界面回调和正常退出；它仅打开指定工作簿的只读副本。`SheetPace.UiProbe.exe` 是交互显示测试，会暂时打开自己的 Excel 窗口并移动鼠标，结束后关闭该实例；不要在正在操作 Excel 时运行。
 
 ## 排障
 
-若功能区未出现，在 Excel **文件 → 选项 → 加载项 → 管理 COM 加载项 → 转到** 中启用 SheetPace。若 Excel 将其禁用，检查“禁用项目”并重新启用。组织安全策略可能限制 COM 加载项；本版安装程序未签名。
+若功能区未出现，在 Excel **文件 → 选项 → 加载项 → 管理 COM 加载项 → 转到** 中启用 SheetPace。1.0.1 修复了原版的 COM 加载接口和 Excel 退出异常，界面及菜单识别改为独立进程。更新安装会备份并恢复明确匹配 SheetPace 的禁用记录；若仍被禁用，检查“禁用项目”并重新启用。组织安全策略可能限制 COM 加载项；本版安装程序未签名。
 
 设置及诊断日志：`%LOCALAPPDATA%/SheetPace/`。卸载保留设置和日志。安装程序不会自动关闭 Excel。
 

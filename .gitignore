@@ -13,3 +13,5 @@ dist/SheetPace.Tests.exe
 dist/SheetPace.ExcelTests.exe
 dist/SheetPace.UiProbe.exe
 dist/SheetPace.WorkbookTest.exe
+dist/SheetPace.ComAbiTests*.exe
+dist/SheetPace.InstalledTests.exe

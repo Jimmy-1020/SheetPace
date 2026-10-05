@@ -44,6 +44,24 @@ class CoreTests
             Check(Settings.Load(path).Transparency == 100, "corrupt settings clamped"); File.Delete(path);
             int size = 100000; object[,] large = new object[size, 1]; for (int i = 0; i < size; i++) large[i, 0] = i % 23;
             data = Count(large, "General"); Check(data.Total == size && data.Items.Count == 23, "100000 row frequency calculation");
+            FilterMenu menu = new FilterMenu { Window = new IntPtr(123456), Timestamp = 7654321, Bounds = new Rectangle(10, 20, 300, 400) };
+            menu.Rows.Add(new FilterRow { Name = "5", Year = "2026", Month = "10月", Bounds = new Rectangle(30, 40, 200, 18) });
+            using (MemoryStream stream = new MemoryStream())
+            {
+                NativeMenuProtocol.Write(new BinaryWriter(stream), menu); stream.Position = 0;
+                FilterMenu received = NativeMenuProtocol.Read(new BinaryReader(stream));
+                Check(received.Window == menu.Window && received.Timestamp == menu.Timestamp && received.Bounds == menu.Bounds && received.Rows.Count == 1 && received.Rows[0].Month == "10月" && received.Rows[0].Year == "2026" && received.Rows[0].Bounds == menu.Rows[0].Bounds, "helper preserves native menu geometry and date hierarchy");
+            }
+            using (MemoryStream stream = new MemoryStream())
+            {
+                NativeMenuProtocol.Write(new BinaryWriter(stream), null); stream.Position = 0;
+                Check(NativeMenuProtocol.Read(new BinaryReader(stream)) == null, "helper reports closed native menu");
+            }
+            using (MemoryStream stream = new MemoryStream(new byte[4]))
+            {
+                bool rejected = false; try { NativeMenuProtocol.Read(new BinaryReader(stream)); } catch (InvalidDataException) { rejected = true; }
+                Check(rejected, "helper rejects incompatible protocol");
+            }
             Console.WriteLine("PASS " + checks + " checks"); return 0;
         }
         catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }

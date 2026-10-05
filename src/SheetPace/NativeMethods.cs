@@ -36,12 +36,6 @@ namespace SheetPace
         [DllImport("user32.dll")] internal static extern bool UpdateLayeredWindow(IntPtr window, IntPtr destDC, ref POINT dest, ref SIZE size,
             IntPtr sourceDC, ref POINT source, int colorKey, ref BLENDFUNCTION blend, int flags);
         [DllImport("user32.dll")] internal static extern bool ShowWindow(IntPtr window, int command);
-        internal delegate IntPtr MouseHookProc(int code, IntPtr message, IntPtr data);
-        [StructLayout(LayoutKind.Sequential)] internal struct MOUSEHOOK { public POINT Point; public uint MouseData, Flags, Time; public IntPtr ExtraInfo; }
-        [DllImport("user32.dll")] internal static extern IntPtr SetWindowsHookEx(int id, MouseHookProc callback, IntPtr module, uint thread);
-        [DllImport("user32.dll")] internal static extern bool UnhookWindowsHookEx(IntPtr hook);
-        [DllImport("user32.dll")] internal static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr message, IntPtr data);
-        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] internal static extern IntPtr GetModuleHandle(string module);
         [StructLayout(LayoutKind.Sequential)] internal struct BITMAPINFO
         {
             public uint Size; public int Width, Height; public ushort Planes, BitCount;

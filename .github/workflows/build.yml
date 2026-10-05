@@ -17,15 +17,23 @@ jobs:
         run: python scripts/build.py
       - name: Core tests
         run: ./dist/SheetPace.Tests.exe tests/output/core
+      - name: Native COM interface tests (64 and 32 bit)
+        run: |
+          ./dist/SheetPace.ComAbiTests.exe
+          if ($LASTEXITCODE -ne 0) { throw "64-bit COM test failed" }
+          ./dist/SheetPace.ComAbiTests.x86.exe
+          if ($LASTEXITCODE -ne 0) { throw "32-bit COM test failed" }
       - name: Installer payload and registration plan
         shell: pwsh
         run: |
-          $check = Start-Process ./dist/SheetPace-Setup-1.0.0.exe -ArgumentList '/selftest "${{ github.workspace }}/tests/output/installer"' -Wait -PassThru
+          $check = Start-Process ./dist/SheetPace-Setup-1.0.1.exe -ArgumentList '/selftest "${{ github.workspace }}/tests/output/installer"' -Wait -PassThru
           if ($check.ExitCode -ne 0) { throw "Installer selftest failed" }
       - uses: actions/upload-artifact@v4
         with:
           name: SheetPace-Windows
           path: |
-            dist/SheetPace-Setup-1.0.0.exe
+            dist/SheetPace-Setup-1.0.1.exe
             dist/SheetPace.dll
+            dist/SheetPace.NativeMenu.exe
+            dist/SheetPace.VisualHost.exe
             dist/SHA256SUMS.txt

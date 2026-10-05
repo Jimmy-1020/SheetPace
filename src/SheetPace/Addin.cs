@@ -19,11 +19,14 @@ namespace SheetPace
         private Rectangle lastRectangle;
         private ExcelContext countContext;
         private Point lastPoint, clickPoint;
-        private bool clickPending;
-        private IntPtr mouseHook;
-        private NativeMethods.MouseHookProc mouseCallback;
+        private bool clickPending, bridge;
+        private VisualHostBridge visualHost;
+        private System.Threading.Timer settingsPoll;
+        private DateTime settingsStamp;
+        public int VisualHostProcessId { get { return visualHost == null ? 0 : visualHost.ProcessId; } }
         public string GetCustomUI(string ribbonID)
         {
+            Log.Write("PID=" + System.Diagnostics.Process.GetCurrentProcess().Id + " Ribbon GetCustomUI", null);
             return @"<customUI xmlns='http://schemas.microsoft.com/office/2009/07/customui' onLoad='OnRibbonLoad'>
 +<ribbon><tabs><tab id='sheetpaceTab' label='SheetPace'>
 +<group id='sheetpaceFilter' label='计数筛选'><button id='showCountFilter' label='计数筛选' size='large' imageMso='Filter' onAction='OnShowFilter' screentip='显示本列各值的数量' supertip='选中目标列中的一个单元格，再打开搜索、多选和计数窗口。'/></group>
@@ -33,29 +36,55 @@ namespace SheetPace
         }
         public void OnConnection(object application, ConnectMode mode, object addInInst, ref Array custom)
         {
+            Log.Write("PID=" + System.Diagnostics.Process.GetCurrentProcess().Id + " OnConnection " + mode, null);
             app = application;
             try
             {
-                settings = Settings.Load(Settings.DefaultPath); hover = new OverlayWindow(); counts = new OverlayWindow();
+                settings = Settings.Load(Settings.DefaultPath);
                 IntPtr hwnd = new IntPtr((int)app.Hwnd); NativeMethods.GetWindowThreadProcessId(hwnd, out process);
-                if (process == 0) process = (uint)System.Diagnostics.Process.GetCurrentProcess().Id;
+                if (process == 0) throw new InvalidOperationException("Excel 窗口不可用");
+                bridge = process == (uint)System.Diagnostics.Process.GetCurrentProcess().Id;
+                if (bridge)
+                {
+                    if (addInInst != null) { dynamic instance = addInInst; instance.Object = this; }
+                    visualHost = new VisualHostBridge(hwnd, process);
+                    settingsStamp = System.IO.File.Exists(Settings.DefaultPath) ? System.IO.File.GetLastWriteTimeUtc(Settings.DefaultPath) : DateTime.MinValue;
+                    settingsPoll = new System.Threading.Timer(RefreshRibbonSettings, null, 1000, 1000);
+                    Log.Write("PID=" + process + " VisualHost=" + visualHost.ProcessId, null);
+                    return;
+                }
+                // All windows and UI Automation live in the standalone STA visual host.
+                hover = new OverlayWindow { Text = "SheetPace Hover Overlay" };
+                counts = new OverlayWindow { Text = "SheetPace Count Overlay" };
                 watcher = new NativeFilterWatcher(process);
-                mouseCallback = MouseEvent; mouseHook = NativeMethods.SetWindowsHookEx(14, mouseCallback, NativeMethods.GetModuleHandle(null), 0);
                 timer = new Timer { Interval = 90 }; timer.Tick += Tick; timer.Start();
                 Log.Write("SheetPace 已连接 Excel " + Convert.ToString(app.Version), null);
             }
             catch (Exception ex) { Log.Write("加载项初始化失败", ex); Stop(); }
         }
+        private void RefreshRibbonSettings(object unused)
+        {
+            try
+            {
+                DateTime stamp = System.IO.File.Exists(Settings.DefaultPath) ? System.IO.File.GetLastWriteTimeUtc(Settings.DefaultPath) : DateTime.MinValue;
+                if (stamp == settingsStamp) return;
+                settingsStamp = stamp; settings = Settings.Load(Settings.DefaultPath);
+                if (ribbon != null) ribbon.Invalidate();
+            }
+            catch { /* Office can be busy or closing. */ }
+        }
         public void OnRibbonLoad(object ui) { ribbon = ui; }
-        public bool GetHoverPressed(object control) { return settings == null || settings.HoverEnabled; }
+        public bool GetHoverPressed(object control) { if (bridge) settings = Settings.Load(Settings.DefaultPath); return settings == null || settings.HoverEnabled; }
         public void OnToggleHover(object control, bool pressed)
         {
+            if (bridge) { if (visualHost != null) visualHost.Send(4, pressed ? 1 : 0); return; }
             if (settings == null) return;
             settings.HoverEnabled = pressed; SaveSettings(); hoverKey = null;
             if (!pressed && hover != null) hover.Hide();
         }
         public void OnSettings(object control)
         {
+            if (bridge) { if (visualHost != null) visualHost.Send(2, 0); return; }
             if (app == null || settings == null) return;
             dialogOpen = true; HideOverlays();
             try
@@ -77,6 +106,7 @@ namespace SheetPace
         }
         public void OnShowFilter(object control)
         {
+            if (bridge) { if (visualHost != null) visualHost.Send(1, 0); return; }
             if (app == null) return;
             dialogOpen = true; HideOverlays(); dynamic cell = null;
             try
@@ -94,7 +124,8 @@ namespace SheetPace
         }
         public void OnHelp(object control)
         {
-            MessageBox.Show("1. 打开列标题的筛选按钮，支持的原生列表会显示数量标签。\n2. 选中目标列中的一个格子，点击“计数筛选”，可搜索、多选并按数量筛选。\n3. 鼠标移动到单元格即可显示行列光影。\n4. 点击“颜色与透明度”调整外观。\n\n计数排除标题，包含筛选区域内所有隐藏行；空白单独计数。\n原生菜单增强依赖 Office 的可访问性支持；不能识别时请使用计数筛选窗口。\n\n版本 1.0.0 · Windows Excel 2016 及以上\n诊断日志：" + Settings.DirectoryPath, "SheetPace 使用说明");
+            if (bridge) { if (visualHost != null) visualHost.Send(3, 0); return; }
+            MessageBox.Show("1. 打开列标题的筛选按钮，支持的原生列表会显示数量标签。\n2. 选中目标列中的一个格子，点击“计数筛选”，可搜索、多选并按数量筛选。\n3. 鼠标移动到单元格即可显示行列光影。\n4. 点击“颜色与透明度”调整外观。\n\n计数排除标题，包含筛选区域内所有隐藏行；空白单独计数。\n原生菜单增强依赖 Office 的可访问性支持；不能识别时请使用计数筛选窗口。\n\n版本 1.0.1 · Windows Excel 2016 及以上\n诊断日志：" + Settings.DirectoryPath, "SheetPace 使用说明");
         }
         private void Tick(object sender, EventArgs args)
         {
@@ -104,16 +135,19 @@ namespace SheetPace
             {
                 if (!NativeMethods.IsProcessForeground(process)) { HideOverlays(); nativeOpen = false; return; }
                 NativeMethods.POINT p; NativeMethods.GetCursorPos(out p); Point pointer = new Point(p.X, p.Y);
-                bool pressed = (NativeMethods.GetAsyncKeyState(1) & 0x8000) != 0;
+                short buttonState = NativeMethods.GetAsyncKeyState(1);
+                bool pressed = (buttonState & 0x8000) != 0;
+                // Poll input on Excel's timer; native callback pointers cannot outlive shutdown.
+                if ((buttonState & 1) != 0 || (pressed && !wasPressed)) { clickPoint = pointer; clickPending = true; }
                 if (pressed && !wasPressed && lastRow > 0) { pendingRow = lastRow; pendingColumn = lastColumn; }
                 wasPressed = pressed;
-                if (++tick % 3 == 0 && settings.NativeCountsEnabled) watcher.Request();
-                FilterMenu menu = watcher.Latest;
+                if (++tick % 3 == 0 && settings.NativeCountsEnabled && watcher != null) watcher.Request();
+                FilterMenu menu = watcher == null ? null : watcher.Latest;
                 bool isMenu = menu != null && NativeMethods.IsWindow(menu.Window) && NativeMethods.IsWindowVisible(menu.Window) && unchecked(Environment.TickCount - (int)menu.Timestamp) < 1500;
                 if (isMenu && settings.NativeCountsEnabled)
                 {
                     hover.Hide(); hoverKey = null;
-                    if (!nativeOpen) PrepareNativeCount();
+                    if (!nativeOpen) { PrepareNativeCount(menu); TraceNativeCount(menu); }
                     nativeOpen = true; DrawCounts(menu); return;
                 }
                 nativeOpen = false; counts.Hide();
@@ -131,7 +165,7 @@ namespace SheetPace
                 lastRow = row; lastColumn = column; lastSheet = sheet; lastPoint = pointer;
                 pendingRow = row; pendingColumn = column;
                 // Precompute while hovering a filter header, before Excel enters its popup loop.
-                if (settings.NativeCountsEnabled && steadyTicks == 3) TryCountContext(row, column, false);
+                if (settings.NativeCountsEnabled && (steadyTicks == 0 || steadyTicks == 3)) TryCountContext(row, column, false);
                 if (!settings.HoverEnabled) { hover.Hide(); return; }
                 string layout = main + ":" + sheet + ":" + row + ":" + column + ":" + grid + ":" + window.Zoom + ":" + window.ScrollRow + ":" + window.ScrollColumn;
                 if (hoverKey == null || geometryKey != layout || !lastRectangle.Contains(pointer))
@@ -158,20 +192,21 @@ namespace SheetPace
             catch { /* Excel may be editing or in a native menu. Keep a prewarmed snapshot. */ }
             finally { if (next != null) next.Dispose(); }
         }
-        private IntPtr MouseEvent(int code, IntPtr message, IntPtr data)
-        {
-            if (code >= 0 && message.ToInt32() == 0x201 && NativeMethods.IsProcessForeground(process))
-            {
-                NativeMethods.MOUSEHOOK info = (NativeMethods.MOUSEHOOK)Marshal.PtrToStructure(data, typeof(NativeMethods.MOUSEHOOK));
-                clickPoint = new Point(info.Point.X, info.Point.Y); clickPending = true;
-            }
-            return NativeMethods.CallNextHookEx(mouseHook, code, message, data);
-        }
-        private void PrepareNativeCount()
+        private void PrepareNativeCount(FilterMenu menu)
         {
             dynamic cell = null, window = null;
             try
             {
+                // Opening a filter arrow does not move ActiveCell. Keep the hovered
+                // header when the popup is anchored there, even if hit testing is blocked
+                // by Excel's popup loop. Keyboard menus at another header use ActiveCell.
+                bool atHeader = countContext != null && countContext.HeaderRow == lastRow &&
+                    countContext.Column == lastColumn && countContext.SheetName == lastSheet;
+                bool besidePointer = Math.Min(Math.Abs(menu.Bounds.Left - lastPoint.X), Math.Abs(menu.Bounds.Right - lastPoint.X)) <= 32;
+                bool belowPointer = menu.Bounds.Top >= lastPoint.Y - 8 && menu.Bounds.Top <= lastPoint.Y + 48;
+                bool abovePointer = menu.Bounds.Bottom >= lastPoint.Y - 48 && menu.Bounds.Bottom <= lastPoint.Y + 8;
+                if (atHeader && besidePointer && (belowPointer || abovePointer) && countContext.MatchesActive())
+                { TryCountContext(lastRow, lastColumn, true); return; }
                 if (clickPending) { window = app.ActiveWindow; cell = window.RangeFromPoint(clickPoint.X, clickPoint.Y); }
                 if (cell == null) cell = app.ActiveCell;
                 if (cell != null) TryCountContext((int)cell.Row, (int)cell.Column, true);
@@ -179,6 +214,27 @@ namespace SheetPace
             }
             catch { if (countContext != null && (countContext.Column != pendingColumn || countContext.SheetName != lastSheet)) DisposeContext(); }
             finally { clickPending = false; ExcelContext.Release(cell); ExcelContext.Release(window); }
+        }
+        private void TraceNativeCount(FilterMenu menu)
+        {
+            string output = Environment.GetEnvironmentVariable("SHEETPACE_NATIVE_DIAGNOSTICS");
+            if (String.IsNullOrEmpty(output)) return;
+            try
+            {
+                System.Text.StringBuilder text = new System.Text.StringBuilder();
+                text.AppendLine("PID=" + process + " column=" + (countContext == null ? 0 : countContext.Column) + " last=" + lastRow + "," + lastColumn + " pending=" + pendingRow + "," + pendingColumn + " menu=" + menu.Bounds);
+                if (countContext != null && countContext.Snapshot != null)
+                {
+                    foreach (CountItem item in countContext.Snapshot.Items) text.AppendLine("SNAPSHOT " + item.Label + "=" + item.Count);
+                    foreach (FilterRow row in menu.Rows)
+                    {
+                        int value; bool found = countContext.Snapshot.TryGetCount(row.Name, row.Year, row.Month, out value);
+                        text.AppendLine("ROW " + row.Name + " found=" + found + " count=" + value + " bounds=" + row.Bounds);
+                    }
+                }
+                System.IO.File.AppendAllText(output, text.ToString());
+            }
+            catch { }
         }
         private void DrawCounts(FilterMenu menu)
         {
@@ -206,16 +262,17 @@ namespace SheetPace
         private void DisposeContext() { if (countContext != null) { countContext.Dispose(); countContext = null; } }
         private void Stop()
         {
-            if (mouseHook != IntPtr.Zero) { NativeMethods.UnhookWindowsHookEx(mouseHook); mouseHook = IntPtr.Zero; }
+            if (settingsPoll != null) { settingsPoll.Dispose(); settingsPoll = null; }
+            if (visualHost != null) { visualHost.Dispose(); visualHost = null; }
             if (timer != null) { timer.Stop(); timer.Dispose(); timer = null; }
             if (watcher != null) { watcher.Dispose(); watcher = null; }
             if (hover != null) { hover.Dispose(); hover = null; }
             if (counts != null) { counts.Dispose(); counts = null; }
             DisposeContext(); ribbon = null; app = null;
         }
-        public void OnDisconnection(DisconnectMode mode, ref Array custom) { Stop(); }
-        public void OnBeginShutdown(ref Array custom) { Stop(); }
+        public void OnDisconnection(DisconnectMode mode, ref Array custom) { Log.Write("PID=" + System.Diagnostics.Process.GetCurrentProcess().Id + " OnDisconnection " + mode, null); Stop(); }
+        public void OnBeginShutdown(ref Array custom) { Log.Write("PID=" + System.Diagnostics.Process.GetCurrentProcess().Id + " OnBeginShutdown", null); Stop(); }
         public void OnAddInsUpdate(ref Array custom) { }
-        public void OnStartupComplete(ref Array custom) { }
+        public void OnStartupComplete(ref Array custom) { Log.Write("PID=" + System.Diagnostics.Process.GetCurrentProcess().Id + " OnStartupComplete", null); }
     }
 }
