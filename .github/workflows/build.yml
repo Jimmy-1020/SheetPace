@@ -1,0 +1,31 @@
+name: Build and test
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build offline
+        run: python scripts/build.py
+      - name: Core tests
+        run: ./dist/SheetPace.Tests.exe tests/output/core
+      - name: Installer payload and registration plan
+        shell: pwsh
+        run: |
+          $check = Start-Process ./dist/SheetPace-Setup-1.0.0.exe -ArgumentList '/selftest "${{ github.workspace }}/tests/output/installer"' -Wait -PassThru
+          if ($check.ExitCode -ne 0) { throw "Installer selftest failed" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SheetPace-Windows
+          path: |
+            dist/SheetPace-Setup-1.0.0.exe
+            dist/SheetPace.dll
+            dist/SHA256SUMS.txt

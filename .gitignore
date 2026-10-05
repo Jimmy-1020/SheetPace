@@ -1,0 +1,15 @@
+# Existing personal spreadsheets are not project artifacts.
+*.xlsx
+*.xls
+*.xlsm
+~$*
+.remote-review/
+tests/output/
+**/bin/
+**/obj/
+**/__pycache__/
+*.pdb
+dist/SheetPace.Tests.exe
+dist/SheetPace.ExcelTests.exe
+dist/SheetPace.UiProbe.exe
+dist/SheetPace.WorkbookTest.exe

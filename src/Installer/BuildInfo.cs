@@ -1,0 +1,1 @@
+namespace SheetPaceInstaller { internal static class BuildInfo { internal const string DllHash = "9124667a68fe93c5bbfc7708a3729ba7d76f1846abe1c3eae1b5060bd519216e"; } }
