@@ -56,8 +56,36 @@ namespace SheetPace
             if (screen.Width <= 0 || screen.Height <= 0 || alpha == 0) { Hide(); return; }
             Color rgb = Color.FromArgb(color.R, color.G, color.B);
             if (BackColor != rgb) BackColor = rgb;
-            NativeMethods.SetLayeredWindowAttributes(Handle, 0, (byte)alpha, 2);
-            NativeMethods.SetWindowPos(Handle, NativeMethods.HWND_TOPMOST, screen.X, screen.Y, screen.Width, screen.Height, NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_SHOWWINDOW);
+            if (!NativeMethods.SetLayeredWindowAttributes(Handle, 0, (byte)alpha, 2)) throw new System.ComponentModel.Win32Exception();
+            if (!NativeMethods.SetWindowPos(Handle, NativeMethods.HWND_TOPMOST, screen.X, screen.Y, screen.Width, screen.Height, NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_SHOWWINDOW)) throw new System.ComponentModel.Win32Exception();
+        }
+        [DllImport("gdi32.dll")] private static extern IntPtr CreateRectRgn(int left, int top, int right, int bottom);
+        [DllImport("gdi32.dll")] private static extern int CombineRgn(IntPtr result, IntPtr first, IntPtr second, int mode);
+        [DllImport("user32.dll")] private static extern int SetWindowRgn(IntPtr window, IntPtr region, bool redraw);
+        public void FillBands(Rectangle[] rows, Rectangle[] columns, Settings settings)
+        {
+            Rectangle bounds = Rectangle.Empty;
+            foreach (Rectangle rect in rows) if (!rect.IsEmpty) bounds = bounds.IsEmpty ? rect : Rectangle.Union(bounds, rect);
+            foreach (Rectangle rect in columns) if (!rect.IsEmpty) bounds = bounds.IsEmpty ? rect : Rectangle.Union(bounds, rect);
+            if (bounds.IsEmpty || settings.Alpha == 0) { Hide(); return; }
+            IntPtr union = CreateRectRgn(0, 0, 0, 0);
+            if (union == IntPtr.Zero) throw new System.ComponentModel.Win32Exception();
+            try
+            {
+                foreach (Rectangle[] group in new[] { rows, columns }) foreach (Rectangle rect in group)
+                {
+                    if (rect.IsEmpty) continue;
+                    IntPtr part = CreateRectRgn(rect.Left - bounds.Left, rect.Top - bounds.Top, rect.Right - bounds.Left, rect.Bottom - bounds.Top);
+                    if (part == IntPtr.Zero) throw new System.ComponentModel.Win32Exception();
+                    try { if (CombineRgn(union, union, part, 2) == 0) throw new System.ComponentModel.Win32Exception(); }
+                    finally { NativeMethods.DeleteObject(part); }
+                }
+                if (SetWindowRgn(Handle, union, false) == 0) throw new System.ComponentModel.Win32Exception();
+                union = IntPtr.Zero; // Windows owns the region until replacement or destruction.
+                Fill(bounds, settings.HighlightColor, settings.Alpha);
+            }
+            catch { Hide(); throw; }
+            finally { if (union != IntPtr.Zero) NativeMethods.DeleteObject(union); }
         }
         public void DrawCross(Rectangle grid, Rectangle cell, Settings settings)
         {
@@ -78,12 +106,14 @@ namespace SheetPace
         private readonly OverlayWindow row = new OverlayWindow();
         private readonly OverlayWindow above = new OverlayWindow();
         private readonly OverlayWindow below = new OverlayWindow();
+        private readonly OverlayWindow multiple = new OverlayWindow { Text = "SheetPace Multi Selection Overlay" };
         public string Text { set { row.Text = value; above.Text = value + " Column Above"; below.Text = value + " Column Below"; } }
         public System.Windows.Forms.Form PrimaryWindow { get { return row; } }
-        public bool Visible { get { return row.Visible || above.Visible || below.Visible; } }
-        public void Hide() { row.Hide(); above.Hide(); below.Hide(); }
+        public bool Visible { get { return row.Visible || above.Visible || below.Visible || multiple.Visible; } }
+        public void Hide() { row.Hide(); above.Hide(); below.Hide(); multiple.Hide(); }
         public void DrawCross(Rectangle grid, Rectangle cell, Settings settings)
         {
+            multiple.Hide();
             Rectangle clipped = Rectangle.Intersect(grid, cell);
             if (clipped.IsEmpty || settings.Alpha == 0) { Hide(); return; }
             // Three disjoint strips avoid a full-grid bitmap and double opacity at the intersection.
@@ -91,7 +121,13 @@ namespace SheetPace
             above.Fill(new Rectangle(clipped.Left, grid.Top, clipped.Width, clipped.Top - grid.Top), settings.HighlightColor, settings.Alpha);
             below.Fill(new Rectangle(clipped.Left, clipped.Bottom, clipped.Width, grid.Bottom - clipped.Bottom), settings.HighlightColor, settings.Alpha);
         }
-        public void Dispose() { row.Dispose(); above.Dispose(); below.Dispose(); }
+        public void DrawBands(Rectangle grid, Rectangle[] rows, Rectangle[] columns, Settings settings)
+        {
+            if (rows.Length == 1 && columns.Length == 1 && rows[0].Left == grid.Left && rows[0].Right == grid.Right && columns[0].Top == grid.Top && columns[0].Bottom == grid.Bottom)
+            { DrawCross(grid, Rectangle.Intersect(rows[0], columns[0]), settings); return; }
+            row.Hide(); above.Hide(); below.Hide(); multiple.FillBands(rows, columns, settings);
+        }
+        public void Dispose() { row.Dispose(); above.Dispose(); below.Dispose(); multiple.Dispose(); }
     }
     internal static class GridGeometry
     {

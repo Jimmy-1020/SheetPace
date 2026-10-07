@@ -143,7 +143,7 @@ namespace SheetPace
         public void OnHelp(object control)
         {
             if (bridge) { if (visualHost != null) visualHost.Send(3, 0); return; }
-            MessageBox.Show("1. 打开列标题的筛选按钮，支持的原生列表会显示数量标签。\n2. 选中目标列中的一个格子，点击“计数筛选”，可搜索、多选并按数量筛选。\n3. 默认点击选中单元格显示十字光影。\n4. 点击“光影设置”切换鼠标跟随，或调整颜色与透明度。\n\n计数排除标题，包含筛选区域内所有隐藏行；空白单独计数。\n原生菜单增强依赖 Office 的可访问性支持；不能识别时请使用计数筛选窗口。\n\n版本 1.0.3 · Windows Excel 2016 及以上\n诊断日志：" + Settings.DirectoryPath, "SheetPace 使用说明");
+            MessageBox.Show("1. 打开列标题的筛选按钮，支持的原生列表会显示数量标签。\n2. 选中目标列中的一个格子，点击“计数筛选”，可搜索、多选并按数量筛选。\n3. 默认点击选中单元格显示十字光影。\n4. 点击“光影设置”切换鼠标跟随，或调整颜色与透明度。\n\n计数排除标题，包含筛选区域内所有隐藏行；空白单独计数。\n原生菜单增强依赖 Office 的可访问性支持；不能识别时请使用计数筛选窗口。\n\n版本 1.0.4 · Windows Excel 2016 及以上\n诊断日志：" + Settings.DirectoryPath, "SheetPace 使用说明");
         }
         private void Tick(object sender, EventArgs args)
         {
@@ -183,8 +183,8 @@ namespace SheetPace
                         if (settings.NativeCountsEnabled && frame.FilterHeader && (steadyTicks == 0 || steadyTicks == 3)) TryCountContext(frame.Row, frame.Column, false);
                     }
                     if (!settings.HoverEnabled || !frame.Visible) { hover.Hide(); hoverKey = null; return; }
-                    string packetKey = frame.Window + ":" + frame.SheetName + ":" + frame.Grid + ":" + frame.Cell + ":" + settings.Alpha + ":" + settings.HighlightColor.ToArgb();
-                    if (hoverKey != packetKey || !hover.Visible) { hover.DrawCross(frame.Grid, frame.Cell, settings); hoverKey = packetKey; }
+                    string packetKey = frame.Window + ":" + frame.SheetName + ":" + frame.Grid + ":" + frame.ShapeRevision + ":" + settings.Alpha + ":" + settings.HighlightColor.ToArgb();
+                    if (hoverKey != packetKey || !hover.Visible) { hover.DrawBands(frame.Grid, frame.RowBands, frame.ColumnBands, settings); hoverKey = packetKey; }
                     return;
                 }
                 IntPtr main = new IntPtr((int)app.Hwnd);
@@ -208,9 +208,9 @@ namespace SheetPace
                     dynamic selected = null;
                     try
                     {
-                        selected = app.ActiveCell; Rectangle selectedGrid;
-                        Rectangle selectedRect = GridGeometry.SelectionRectangle(window, selected, GridGeometry.FindGrids(main), pointer, out selectedGrid);
-                        hover.DrawCross(selectedGrid, selectedRect, settings);
+                        selected = app.Selection;
+                        HighlightBands selectedBands = SelectionGeometry.Project(window, GridGeometry.FindGrids(main), SelectionSnapshot.Capture(selected));
+                        hover.DrawBands(selectedBands.Grid, selectedBands.Rows, selectedBands.Columns, settings);
                     }
                     finally { ExcelContext.Release(selected); }
                     return;

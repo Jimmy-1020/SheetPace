@@ -32,9 +32,13 @@ namespace SheetPace
         private readonly HoverPacket packet;
         private dynamic app;
         private IntPtr window;
-        private bool registered, stopping, busy;
+        private bool registered, stopping, busy, failureLogged;
         private string geometryKey, headerKey;
         private Rectangle rectangle, targetGrid;
+        private HighlightBands bands = new HighlightBands();
+        private SelectionSnapshot selectionSnapshot;
+        private string selectionAddress;
+        private int geometryStamp;
         private int headerStamp;
         private readonly List<int[]> headers = new List<int[]>();
         private readonly HoverFrame latest = new HoverFrame();
@@ -58,10 +62,11 @@ namespace SheetPace
         }
         private void Sample()
         {
-            busy = true; Stopwatch watch = Stopwatch.StartNew(); dynamic view = null, cell = null, selected = null, targetArea = null, sheet = null;
+            busy = true; Stopwatch watch = Stopwatch.StartNew(); dynamic view = null, cell = null, selected = null, active = null, targetArea = null, sheet = null;
             try
             {
                 latest.Visible = latest.PointerValid = latest.FilterHeader = false;
+                latest.RowBands = latest.ColumnBands = new Rectangle[0];
                 latest.Row = latest.Column = latest.TargetRow = latest.TargetColumn = 0;
                 if (unchecked(Environment.TickCount - settingsStamp) >= 1000) { settingsStamp = Environment.TickCount; refreshSettings(); }
                 Settings settings = currentSettings();
@@ -87,31 +92,55 @@ namespace SheetPace
                     }
                 }
                 if (!settings.HoverEnabled) return;
-                dynamic target = cell;
-                if (settings.Mode == HighlightMode.ClickSelection) { selected = app.ActiveCell; target = selected; }
+                dynamic target = cell; string address = "";
+                if (settings.Mode == HighlightMode.ClickSelection)
+                { selected = app.Selection; active = app.ActiveCell; target = active; address = (string)selected.Address; }
                 if (target == null) return;
                 targetArea = target.MergeArea; latest.TargetRow = (int)targetArea.Row; latest.TargetColumn = (int)targetArea.Column;
                 List<Rectangle> grids = settings.Mode == HighlightMode.ClickSelection ? GridGeometry.FindGrids(main) : new List<Rectangle> { pointerGrid };
-                string layout = main + ":" + view.Caption + ":" + name + ":" + settings.Mode + ":" + latest.TargetRow + ":" + latest.TargetColumn + ":" + String.Join(";", grids)
+                string selectionIdentity = main + ":" + view.Caption + ":" + name + ":" + address + ":" + targetArea.Address;
+                string layout = selectionIdentity + ":" + settings.Mode + ":" + latest.TargetRow + ":" + latest.TargetColumn + ":" + String.Join(";", grids)
                     + ":" + view.Zoom + ":" + view.ScrollRow + ":" + view.ScrollColumn + ":" + view.SplitRow + ":" + view.SplitColumn;
-                if (geometryKey != layout || (settings.Mode == HighlightMode.FollowMouse && !rectangle.Contains(pointer)))
+                bool refresh = settings.Mode == HighlightMode.ClickSelection && unchecked(Environment.TickCount - geometryStamp) >= 1000;
+                if (geometryKey != layout || refresh || (settings.Mode == HighlightMode.FollowMouse && !rectangle.Contains(pointer)))
                 {
+                    HighlightBands next;
                     if (settings.Mode == HighlightMode.ClickSelection)
-                        rectangle = GridGeometry.SelectionRectangle(view, target, grids, pointer, out targetGrid);
-                    else { targetGrid = pointerGrid; rectangle = GridGeometry.CellRectangle(view, target, pointerGrid, pointer); }
-                    geometryKey = layout;
+                    {
+                        if (selectionSnapshot == null || selectionAddress != selectionIdentity)
+                        { selectionSnapshot = SelectionSnapshot.Capture(selected); selectionAddress = selectionIdentity; }
+                        next = SelectionGeometry.Project(view, grids, selectionSnapshot); targetGrid = next.Grid;
+                        if (next.Rows.Length == 1 && next.Columns.Length == 1) rectangle = Rectangle.Intersect(next.Rows[0], next.Columns[0]);
+                        else rectangle = GridGeometry.SelectionRectangle(view, target, grids, pointer, out pointerGrid);
+                    }
+                    else
+                    {
+                        targetGrid = pointerGrid; rectangle = GridGeometry.CellRectangle(view, target, pointerGrid, pointer);
+                        Rectangle clipped = Rectangle.Intersect(targetGrid, rectangle);
+                        next = new HighlightBands { Grid = targetGrid,
+                            Rows = new[] { new Rectangle(targetGrid.Left, clipped.Top, targetGrid.Width, clipped.Height) },
+                            Columns = new[] { new Rectangle(clipped.Left, targetGrid.Top, clipped.Width, targetGrid.Height) } };
+                    }
+                    if (next.Grid != bands.Grid || !Same(next.Rows, bands.Rows) || !Same(next.Columns, bands.Columns)) latest.ShapeRevision = unchecked(latest.ShapeRevision + 1);
+                    bands = next; geometryKey = layout; geometryStamp = Environment.TickCount;
                 }
-                latest.Grid = targetGrid; latest.Cell = rectangle; latest.Visible = !rectangle.IsEmpty && !targetGrid.IsEmpty;
+                latest.Grid = targetGrid; latest.Cell = rectangle; latest.RowBands = bands.Rows; latest.ColumnBands = bands.Columns; latest.Visible = bands.Visible; failureLogged = false;
             }
-            catch { geometryKey = null; latest.Visible = false; }
+            catch (Exception ex) { geometryKey = null; latest.Visible = false; if (!failureLogged) { Log.Write("选区坐标采样失败", ex); failureLogged = true; } }
             finally
             {
-                ExcelContext.Release(targetArea); ExcelContext.Release(selected); ExcelContext.Release(sheet); ExcelContext.Release(cell); ExcelContext.Release(view);
+                ExcelContext.Release(targetArea); ExcelContext.Release(active); ExcelContext.Release(selected); ExcelContext.Release(sheet); ExcelContext.Release(cell); ExcelContext.Release(view);
                 watch.Stop(); latest.ElapsedMicroseconds = (int)Math.Min(Int32.MaxValue, watch.ElapsedTicks * 1000000L / Stopwatch.Frequency);
                 latest.Timestamp = Environment.TickCount;
                 try { packet.Publish(latest); } catch { }
                 busy = false;
             }
+        }
+        private static bool Same(Rectangle[] first, Rectangle[] second)
+        {
+            if (first.Length != second.Length) return false;
+            for (int i = 0; i < first.Length; i++) if (first[i] != second[i]) return false;
+            return true;
         }
         private void AddHeader(dynamic source)
         {

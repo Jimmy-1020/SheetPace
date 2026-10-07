@@ -16,3 +16,5 @@ dist/SheetPace.WorkbookTest.exe
 dist/SheetPace.ComAbiTests*.exe
 dist/SheetPace.InstalledTests.exe
 dist/SheetPace.HoverTests.exe
+dist/SheetPace.RangeTests.exe
+dist/SheetPace.Tests.x86.exe

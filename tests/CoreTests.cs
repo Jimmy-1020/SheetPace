@@ -84,25 +84,41 @@ class CoreTests
                 bool rejected = false; try { NativeMenuProtocol.Read(new BinaryReader(stream)); } catch (InvalidDataException) { rejected = true; }
                 Check(rejected, "helper rejects incompatible protocol");
             }
+            IndexSpan[] spans = SelectionSnapshot.Merge(new System.Collections.Generic.List<IndexSpan> {
+                new IndexSpan(9, 11), new IndexSpan(3, 3), new IndexSpan(1, 2), new IndexSpan(10, 12), new IndexSpan(6, 6) });
+            Check(spans.Length == 3 && spans[0].First == 1 && spans[0].Last == 3 && spans[1].First == 6 && spans[1].Last == 6 && spans[2].First == 9 && spans[2].Last == 12, "selection union merges overlap and adjacency, preserves gaps");
             uint testProcess = 0x40000000u + (uint)System.Diagnostics.Process.GetCurrentProcess().Id;
             using (HoverPacket writer = new HoverPacket(testProcess, true))
             using (HoverPacket reader = new HoverPacket(testProcess, false))
             {
                 Check(reader.Read() == null, "hover reader ignores uninitialized packet");
                 writer.Publish(new HoverFrame { Visible = true, Window = new IntPtr(123456), Row = 7, Column = -7,
-                    Pointer = new Point(7, -7), Grid = new Rectangle(7, 2, 3, 4), Cell = new Rectangle(5, 7, 8, 9),
+                    ShapeRevision = 7, RowBands = new[] { new Rectangle(7, 2, 300, 4), new Rectangle(7, 20, 300, 4) }, ColumnBands = new[] { new Rectangle(8, 2, 30, 400) }, Pointer = new Point(7, -7), Grid = new Rectangle(7, 2, 3, 4), Cell = new Rectangle(5, 7, 8, 9),
                     SheetName = "定位测试", FilterHeader = true, PointerValid = true, TargetRow = 12, TargetColumn = 4, Mode = HighlightMode.ClickSelection, ElapsedMicroseconds = 1200, Timestamp = 9 });
                 HoverFrame received = reader.Read();
                 Check(received != null && received.Row == 7 && received.Column == -7 && received.Pointer == new Point(7, -7) && received.Grid.X == 7 && received.Cell.Y == 7 && received.SheetName == "定位测试" && received.FilterHeader && received.Window == new IntPtr(123456) && received.ElapsedMicroseconds == 1200 && received.PointerValid && received.TargetRow == 12 && received.TargetColumn == 4 && received.Mode == HighlightMode.ClickSelection, "hover packet geometry and metadata roundtrip");
+                Check(received.ShapeRevision == 7 && received.RowBands.Length == 2 && received.ColumnBands.Length == 1 && received.RowBands[1].Y == 20 && received.ColumnBands[0].Height == 400, "variable-length highlight bands roundtrip beyond fixed header");
+                bool oversized = false;
+                try { writer.Publish(new HoverFrame { RowBands = new Rectangle[HoverPacket.MaxBands + 1] }); } catch (ArgumentOutOfRangeException) { oversized = true; }
+                Check(oversized && reader.Read().Row == 7, "excess bands rejected before overwriting valid frame");
                 System.Threading.Thread producer = new System.Threading.Thread(delegate()
                 {
-                    for (int i = 8; i < 5008; i++) writer.Publish(new HoverFrame { Visible = true, Row = i, Column = -i, Pointer = new Point(i, -i), Grid = new Rectangle(i, 2, 3, 4), Cell = new Rectangle(5, i, 8, 9) });
+                    for (int i = 8; i < 5008; i++) {
+                        Rectangle[] rowBands = new Rectangle[i % 9 + 1];
+                        for (int j = 0; j < rowBands.Length; j++) rowBands[j] = new Rectangle(i, j, 300, i);
+                        writer.Publish(new HoverFrame { Visible = true, Row = i, Column = -i, ShapeRevision = i, RowBands = rowBands,
+                            ColumnBands = new[] { new Rectangle(-i, 0, 20, i) }, Pointer = new Point(i, -i), Grid = new Rectangle(i, 2, 3, 4), Cell = new Rectangle(5, i, 8, 9) });
+                    }
                 });
                 producer.Start(); bool coherent = true; int samples = 0;
                 while (producer.IsAlive)
                 {
                     HoverFrame frame = reader.Read(); if (frame == null) continue; samples++;
-                    if (frame.Column != -frame.Row || frame.Pointer.X != frame.Row || frame.Pointer.Y != -frame.Row || frame.Grid.X != frame.Row || frame.Cell.Y != frame.Row) coherent = false;
+                    if (frame.Column != -frame.Row || frame.Pointer.X != frame.Row || frame.Pointer.Y != -frame.Row || frame.Grid.X != frame.Row || frame.Cell.Y != frame.Row || frame.ShapeRevision != frame.Row) coherent = false;
+                    if (frame.Row >= 8) {
+                        if (frame.RowBands.Length != frame.Row % 9 + 1 || frame.ColumnBands.Length != 1 || frame.ColumnBands[0].X != -frame.Row) coherent = false;
+                        foreach (Rectangle band in frame.RowBands) if (band.X != frame.Row || band.Height != frame.Row) coherent = false;
+                    }
                 }
                 producer.Join();
                 Check(coherent && samples > 0 && reader.Read().Row == 5007, "hover sequence protects concurrent readers from torn frames");

@@ -4,7 +4,7 @@ Windows Excel 插件：筛选值计数、鼠标行列光影，以及可调整的
 
 ## 安装
 
-下载 [SheetPace-Setup-1.0.3.exe](dist/SheetPace-Setup-1.0.3.exe)，保存工作簿并关闭所有 Excel 进程后双击安装。当前用户安装，无需管理员权限。重新打开 Excel，在功能区找到 **SheetPace**。已安装旧版时，直接运行 1.0.3 覆盖更新；请使用此 Setup 文件安装。
+下载 [SheetPace-Setup-1.0.4.exe](dist/SheetPace-Setup-1.0.4.exe)，保存工作簿并关闭所有 Excel 进程后双击安装。当前用户安装，无需管理员权限。重新打开 Excel，在功能区找到 **SheetPace**。已安装旧版时，直接运行 1.0.4 覆盖更新；请使用此 Setup 文件安装。
 
 - Windows 10 / 11，Microsoft Excel 桌面版，.NET Framework 4.8。
 - 使用 AnyCPU COM 类库，在 32 / 64 位注册视图分别注册。目标 Office 2016 及以上；目前实际测试为 64 位 Microsoft 365，其他版本和 32 位 Office 需要回归验证。
@@ -17,7 +17,7 @@ Windows Excel 插件：筛选值计数、鼠标行列光影，以及可调整的
 
 次数统计当前自动筛选区域 / Excel 表格的整列数据，排除标题，包含筛选隐藏的行；空白单独计数。没有筛选区域时使用当前连续数据区域，并在点击“应用”后创建自动筛选。一个工作表只能有一个普通范围的自动筛选；已有筛选在其他区域时会提示，避免改错数据。
 
-![鼠标光影图标](docs/images/hover-icon.png) **鼠标光影**：点击带有网格与指针图标的“鼠标光影”按钮，可快速开关十字行列光影。默认使用 **点击选中** 模式，以当前选中的单元格为中心，移动鼠标不改变光影位置；点击其他单元格或用键盘改变活动单元格时，光影随选中格更新。也可使用 **鼠标跟随** 模式，鼠标移到哪个格子，光影就跟随到该格，无需点击。覆盖层不接收鼠标操作，也不修改内容、选区或单元格格式。离开 Excel、进入对话框或拖动时隐藏；选中格不在可视区域时不显示。
+![鼠标光影图标](docs/images/hover-icon.png) **鼠标光影**：点击带有网格与指针图标的“鼠标光影”按钮，可快速开关十字行列光影。默认使用 **点击选中** 模式，覆盖当前选中的单元格或范围对应的全部行、列，移动鼠标不改变光影位置。框选一横排、一列或矩形时，光影覆盖全部选中格；按住 Ctrl 选择多个不连续单元格或区域时，各自的行列同时亮起，保留中间未选行列的间隔。改变选区后同步更新，交叉处透明度一致。也可使用 **鼠标跟随** 模式，鼠标移到哪个格子，光影就跟随到该格，无需点击。覆盖层不接收鼠标操作，也不修改内容、选区或单元格格式。离开 Excel、进入对话框或拖动时隐藏；仅绘制所选行列在当前窗口中的可见部分。
 
 ![光影设置图标](docs/images/settings-icon.png) **光影设置**：点击带有网格与齿轮图标的 **光影设置**，切换点击选中 / 鼠标跟随模式，选择颜色、调整透明度并预览。100% 透明时光影不可见。保存后模式、颜色和透明度会在下次启动时保留；取消不会应用修改。旧配置首次升级默认采用点击选中模式，保留已有颜色、透明度和启用开关。
 
@@ -36,10 +36,12 @@ Excel 没有公开接口让插件修改原生筛选列表的渲染。本插件�
 ```powershell
 python scripts/build.py
 ./dist/SheetPace.Tests.exe tests/output/core
+./dist/SheetPace.Tests.x86.exe tests/output/core-x86
 ./dist/SheetPace.ComAbiTests.exe
 ./dist/SheetPace.ComAbiTests.x86.exe
-./dist/SheetPace-Setup-1.0.3.exe /selftest "$PWD/tests/output/installer"
+./dist/SheetPace-Setup-1.0.4.exe /selftest "$PWD/tests/output/installer"
 ./dist/SheetPace.ExcelTests.exe tests/output/excel
+./dist/SheetPace.RangeTests.exe tests/output/ranges
 ./dist/SheetPace.HoverTests.exe tests/output/selection --selection
 ./dist/SheetPace.HoverTests.exe tests/output/hover --packet
 ```
@@ -50,7 +52,7 @@ python scripts/build.py
 
 ## 排障
 
-若功能区未出现，在 Excel **文件 → 选项 → 加载项 → 管理 COM 加载项 → 转到** 中启用 SheetPace。1.0.1 修复了原版的 COM 加载接口和 Excel 退出异常；1.0.2 将鼠标坐标查询改为 Excel 内部采样并缓存，只传输坐标，光影改为窄条窗口，减少移动时的延迟。1.0.3 增加默认点击选中与鼠标跟随两种模式、专用图标及光影设置入口。界面及菜单识别在独立进程中运行。更新安装会备份并恢复明确匹配 SheetPace 的禁用记录；若仍被禁用，检查“禁用项目”并重新启用。组织安全策略可能限制 COM 加载项；本版安装程序未签名。
+若功能区未出现，在 Excel **文件 → 选项 → 加载项 → 管理 COM 加载项 → 转到** 中启用 SheetPace。1.0.1 修复了原版的 COM 加载接口和 Excel 退出异常；1.0.2 将鼠标坐标查询改为 Excel 内部采样并缓存，只传输坐标，光影改为窄条窗口，减少移动时的延迟。1.0.3 增加默认点击选中与鼠标跟随两种模式、专用图标及光影设置入口。1.0.4 将选中光影扩展到连续范围与 Ctrl 多选区，缓存逻辑范围，并用统一透明度的区域窗口绘制多个行列带。界面及菜单识别在独立进程中运行。更新安装会备份并恢复明确匹配 SheetPace 的禁用记录；若仍被禁用，检查“禁用项目”并重新启用。组织安全策略可能限制 COM 加载项；本版安装程序未签名。
 
 设置及诊断日志：`%LOCALAPPDATA%/SheetPace/`。卸载保留设置和日志。安装程序不会自动关闭 Excel。
 

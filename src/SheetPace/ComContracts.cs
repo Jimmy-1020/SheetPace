@@ -1,9 +1,11 @@
 ﻿using System;
 using System.Runtime.InteropServices;
 [assembly: ComVisible(false)]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("SheetPace.RangeTests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("SheetPace.Tests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("SheetPace.Tests.x86")]
 [assembly: System.Reflection.AssemblyVersion("1.0.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.0.3.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.0.4.0")]
 namespace SheetPace
 {
     public enum ConnectMode { AfterStartup = 0, Startup = 1, External = 2, CommandLine = 3, Solution = 4, UISetup = 5 }

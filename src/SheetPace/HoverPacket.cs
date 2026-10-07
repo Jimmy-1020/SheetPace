@@ -7,16 +7,20 @@ namespace SheetPace
 {
     internal sealed class HoverFrame
     {
-        internal int Sequence, Row, Column, TargetRow, TargetColumn, ElapsedMicroseconds, Timestamp;
+        internal int Sequence, Row, Column, TargetRow, TargetColumn, ElapsedMicroseconds, Timestamp, ShapeRevision;
         internal bool Visible, PointerValid, FilterHeader;
         internal HighlightMode Mode;
         internal IntPtr Window;
         internal Point Pointer;
         internal Rectangle Grid, Cell;
+        internal Rectangle[] RowBands = new Rectangle[0], ColumnBands = new Rectangle[0];
         internal string SheetName;
     }
     internal sealed class HoverPacket : IDisposable
     {
+        internal const int MaxBands = 16384;
+        private const int Capacity = 256 + MaxBands * 16;
+        private const int Protocol = 0x535004;
         private MemoryMappedFile file;
         private MemoryMappedViewAccessor view;
         private readonly bool writer;
@@ -25,12 +29,14 @@ namespace SheetPace
         internal HoverPacket(uint process, bool write)
         {
             writer = write;
-            file = write ? MemoryMappedFile.CreateNew(Name(process), 256) : MemoryMappedFile.OpenExisting(Name(process), MemoryMappedFileRights.Read);
-            view = file.CreateViewAccessor(0, 256, write ? MemoryMappedFileAccess.ReadWrite : MemoryMappedFileAccess.Read);
+            file = write ? MemoryMappedFile.CreateNew(Name(process), Capacity) : MemoryMappedFile.OpenExisting(Name(process), MemoryMappedFileRights.Read);
+            view = file.CreateViewAccessor(0, Capacity, write ? MemoryMappedFileAccess.ReadWrite : MemoryMappedFileAccess.Read);
         }
         internal void Publish(HoverFrame frame)
         {
             if (!writer || view == null) return;
+            Rectangle[] rows = frame.RowBands ?? new Rectangle[0], columns = frame.ColumnBands ?? new Rectangle[0];
+            if ((long)rows.Length + columns.Length > MaxBands) throw new ArgumentOutOfRangeException("frame", "Too many visible highlight bands");
             sequence = unchecked(sequence + 2);
             view.Write(0, sequence - 1); Thread.MemoryBarrier();
             view.Write(4, frame.Visible ? 1 : 0); view.Write(8, frame.Window.ToInt64());
@@ -41,6 +47,10 @@ namespace SheetPace
             byte[] name = new byte[64]; byte[] text = Encoding.Unicode.GetBytes(frame.SheetName ?? "");
             Buffer.BlockCopy(text, 0, name, 0, Math.Min(text.Length, 62)); view.WriteArray(80, name, 0, name.Length);
             view.Write(76, frame.PointerValid ? 1 : 0); view.Write(144, frame.TargetRow); view.Write(148, frame.TargetColumn); view.Write(152, (int)frame.Mode);
+            view.Write(156, rows.Length); view.Write(160, columns.Length); view.Write(164, frame.ShapeRevision); view.Write(168, Protocol);
+            int offset = 256;
+            foreach (Rectangle rect in rows) { WriteRectangle(offset, rect); offset += 16; }
+            foreach (Rectangle rect in columns) { WriteRectangle(offset, rect); offset += 16; }
             Thread.MemoryBarrier(); view.Write(0, sequence);
         }
         private void WriteRectangle(int offset, Rectangle rect)
@@ -54,12 +64,18 @@ namespace SheetPace
             {
                 int before = view.ReadInt32(0); if (before == 0 || (before & 1) != 0) continue;
                 Thread.MemoryBarrier();
+                int rowCount = view.ReadInt32(156), columnCount = view.ReadInt32(160);
+                if (view.ReadInt32(168) != Protocol || rowCount < 0 || columnCount < 0 || (long)rowCount + columnCount > MaxBands) continue;
                 HoverFrame frame = new HoverFrame { Sequence = before, Visible = view.ReadInt32(4) != 0, Window = new IntPtr(view.ReadInt64(8)),
                     Row = view.ReadInt32(16), Column = view.ReadInt32(20), Pointer = new Point(view.ReadInt32(24), view.ReadInt32(28)),
                     Grid = ReadRectangle(32), Cell = ReadRectangle(48), FilterHeader = view.ReadInt32(64) != 0,
                     ElapsedMicroseconds = view.ReadInt32(68), Timestamp = view.ReadInt32(72), PointerValid = view.ReadInt32(76) != 0,
-                    TargetRow = view.ReadInt32(144), TargetColumn = view.ReadInt32(148), Mode = (HighlightMode)view.ReadInt32(152) };
+                    TargetRow = view.ReadInt32(144), TargetColumn = view.ReadInt32(148), Mode = (HighlightMode)view.ReadInt32(152), ShapeRevision = view.ReadInt32(164),
+                    RowBands = new Rectangle[rowCount], ColumnBands = new Rectangle[columnCount] };
                 byte[] text = new byte[64]; view.ReadArray(80, text, 0, text.Length); frame.SheetName = Encoding.Unicode.GetString(text).TrimEnd((char)0);
+                int offset = 256;
+                for (int i = 0; i < rowCount; i++) { frame.RowBands[i] = ReadRectangle(offset); offset += 16; }
+                for (int i = 0; i < columnCount; i++) { frame.ColumnBands[i] = ReadRectangle(offset); offset += 16; }
                 Thread.MemoryBarrier(); if (before == view.ReadInt32(0)) return frame;
             }
             return null;

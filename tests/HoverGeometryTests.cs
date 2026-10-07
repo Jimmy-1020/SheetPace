@@ -32,6 +32,11 @@ class HoverGeometryTests
         EnumWindows(delegate(IntPtr hwnd,IntPtr unused){uint owner;GetWindowThreadProcessId(hwnd,out owner);if(owner!=pid)return true;System.Text.StringBuilder title=new System.Text.StringBuilder(128);GetWindowText(hwnd,title,128);if(owner==pid && title.ToString()=="SheetPace Hover Overlay"){result=hwnd;return false;}return true;},IntPtr.Zero);
         cachedOverlay=result;return result;
     }
+    static void Activate(IntPtr main)
+    {
+        SetForegroundWindow(main);
+        if(GetForegroundWindow()!=main){RECT bounds;GetWindowRect(main,out bounds);SetCursorPos(bounds.R-420,bounds.T+24);mouse_event(2,0,0,0,UIntPtr.Zero);mouse_event(4,0,0,0,UIntPtr.Zero);Thread.Sleep(100);}
+    }
     static double Median(List<double> values) { values.Sort();return values[values.Count/2]; }
     static void Check(bool value,string name) { if(!value)throw new Exception(name);checks++; }
     static void Release(object value) { if(value!=null && Marshal.IsComObject(value))Marshal.ReleaseComObject(value); }
@@ -55,7 +60,7 @@ class HoverGeometryTests
             book=app.Workbooks.Add();sheet=book.Worksheets[1];sheet.Range["A1:Z100"].ColumnWidth=9.5;sheet.Range["A1:Z100"].RowHeight=18;
             sheet.Range["C3:E4"].Merge();sheet.Range["C3"].Value2="Merged test";
             app.Visible=true;app.WindowState=-4137;window=app.ActiveWindow;
-            IntPtr main=new IntPtr((int)app.Hwnd);SetForegroundWindow(main);Thread.Sleep(500);
+            IntPtr main=new IntPtr((int)app.Hwnd);Activate(main);Thread.Sleep(500);
             Type geometry=typeof(Connect).Assembly.GetType("SheetPace.GridGeometry");
             MethodInfo find=geometry.GetMethod("FindGrid"),slow=geometry.GetMethod("CellRectangle");
             uint visualPid=0;MethodInfo read=null;
@@ -87,12 +92,12 @@ class HoverGeometryTests
                         cell=window.RangeFromPoint(point.X,point.Y);if(cell==null)continue;merged=cell.MergeArea;
                         int row=(int)merged.Row,column=(int)merged.Column;
                         if((int)merged.Cells.Count>1)mergedChecks++;
-                        if(packetMode)SetForegroundWindow(main);
+                        if(packetMode)Activate(main);
                         Stopwatch watch=Stopwatch.StartNew();Rectangle rect=Rectangle.Empty;
                         if(packetMode)
                         {
                             if(selectionMode)merged.Select();
-                            SetForegroundWindow(main);SetCursorPos(point.X,point.Y);
+                            Activate(main);SetCursorPos(point.X,point.Y);
                             object frame=null;
                             while(watch.ElapsedMilliseconds<2000)
                             {
@@ -110,7 +115,7 @@ class HoverGeometryTests
                             }
                             Check(frame!=null,selectionMode?"probe follows selected cell":"probe follows pointer");rect=(Rectangle)Field(frame,"Cell");
                             nativeTimes.Add((int)Field(frame,"ElapsedMicroseconds")/1000.0);
-                            Rectangle expected=new Rectangle(grid.Left,rect.Top,grid.Width,rect.Height);
+                            Rectangle drawnGrid=(Rectangle)Field(frame,"Grid");Rectangle expected=new Rectangle(drawnGrid.Left,rect.Top,drawnGrid.Width,rect.Height);
                             bool rendered=false;
                             while(watch.ElapsedMilliseconds<2000)
                             {
